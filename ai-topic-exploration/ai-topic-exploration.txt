@@ -1,0 +1,80 @@
+# AI Topic Exploration
+
+## Topic I Chose
+Black holes
+
+## Why I Chose It
+I have always seen black holes in movies and places but never actually understood what they are or how they form. I was curious whether they really 'suck everything in like in the movies.
+
+## Prompt Shortcut I Picked From The Guide
+ELI5 (Explain very simply). I also used Examples, First Principles, Quiz me, and Sources.
+
+## First Explanation Using An ELI5 Prompt
+Space behaves a bit like a stretched trampoline: heavy objects bend it, and that bending is what we feel as gravity. A black hole is what happens when a huge amount of mass gets squeezed into a tiny space, bending that "trampoline" so deeply that beyond a certain boundary nothing can climb back out — not even light, which is why it looks black. It is not an empty hole; it is an extremely dense object. It also is not a vacuum cleaner: if the Sun were swapped for a black hole of the same mass, Earth would keep orbiting almost the same way. We can't see the hole itself, but we see its effects — stars orbiting an invisible point, glowing gas falling in, gravitational waves, and the 2019 image of the glowing ring around one.
+
+## Vocabulary I Learned
+- Gravity: the bending of space caused by mass, what pulls objects together.
+- Event horizon: the "point of no return" boundary. Once it's crossed, escaping is impossible.
+- Escape velocity: the speed needed to leave an object's gravity forever.
+- Singularity: the predicted center where matter is crushed to an almost infinite density and current physics breaks down.
+- Gravitational waves: ripples in space made when massive objects (like two black holes) collide.
+
+## Best Analogy Or Example
+The waterfall analogy helped the most. Far upstream on a river you can paddle anywhere but as you go near the waterfall the current gets too strong to fight and past the edge there's no paddling back.
+
+## Misconceptions Or Surprises
+- A black hole is not a vacuum cleaner. It only pulls extremely hard when you get very close.
+- A black hole is a lot of matter packed into a tiny space.
+- We can't see black holes. We infer them from their effects on surrounding
+  stars, gas, and space itself.
+
+## My Teach-Back
+A black hole forms when a very massive star runs out of fuel. Normally, fusion pushes outward and balances gravity pulling inward, but once the fuel is gone, gravity wins and the star collapses into a tiny, super-dense region. Its gravity gets so strong that not even light can escape past the event horizon, so it looks black.
+
+ChatGPT's feedback: 
+```md
+Your explanation captures the core idea well. Here's a breakdown:
+
+**What you got right**
+
+* A **very massive star** can eventually form a black hole after it runs out of nuclear fuel.
+* During the star's life, **outward pressure from nuclear fusion** balances the inward pull of gravity.
+* When fusion can no longer support the star, **gravity causes it to collapse**.
+* A black hole's gravity is so strong that **light cannot escape from inside the event horizon**.
+
+**What you misunderstood or could phrase more precisely**
+
+* You said the star collapses into a "**tiny, super-dense region.**" That's a good simplified description, but it's worth distinguishing between:
+
+  * the **event horizon**, which is the boundary beyond which nothing can escape, and
+  * the **singularity**, which is the point (according to general relativity) where matter is thought to be compressed to an extremely small volume. Scientists expect our current theories break down there, so we don't yet know exactly what the center is like.
+
+**What you left out**
+
+* The collapse is often accompanied by a **supernova explosion**, which blows off the star's outer layers before (or while) the core becomes a black hole.
+* Not every star becomes a black hole. **Only the most massive stars** leave behind enough mass after collapse. Less massive stars become **white dwarfs** or **neutron stars** instead.
+* The black hole itself isn't "sucking" things in more than any other object of the same mass. Far away, its gravity behaves just like the gravity of any other object with the same mass.
+
+**Overall:** I'd rate this **9/10**. You explained the main mechanism clearly and accurately. Adding the distinction between the event horizon and the center of the black hole, plus mentioning that only the most massive stars form black holes, would make it even stronger.
+```
+
+## What I Still Do Not Understand
+- What actually happens at the singularity? ChatGPT said current physics "stops working"
+  there, but I don't understand why our theories stop working, or what will change?
+
+## Three Better Questions I Could Ask Next
+1. Does black holes have different types?
+2. Can black holes die or disappear?
+3. How did we photograph a black hole if light can't escape it?
+
+## Verification Notes
+### Two search terms I could use:
+- "NASA What is a black hole?"
+- "Black hole picture How taken?"
+
+### One type of source that would probably be reliable:
+- Space agencies (NASA)
+
+### One claim I would want to double-check:
+- If the Sun were replaced by a black hole of the same mass, would Earth's orbit stay
+  almost exactly the same?

@@ -1,0 +1,9 @@
+# The Best Pipeline Output
+**Command: **
+```
+cat log.txt | grep "ERROR" | wc -l
+```
+**Example of an Actual Output: **
+```
+3
+```
