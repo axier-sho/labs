@@ -1,0 +1,17 @@
+{
+  "student_name": "Sho",
+  "grade_level": 10,
+  "favorite_subject": "computer_science",
+  "uses_voice_mode": false,
+  "daily_study_minutes": 30,
+  "favorite_tools": [
+    "timer",
+    "calculator",
+    "spotify"
+  ],
+  "preferences": {
+    "response_style": "short and simple",
+    "include_examples": true,
+    "max_answer_length": "short"
+  }
+}

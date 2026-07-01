@@ -1,0 +1,37 @@
+{
+  "class_name": "Computer_Science",
+  "room_number": "888",
+  "instructor": "Mr. Kevin",
+  "number_of_students": 16,
+  "teams": [
+    {
+      "team_name": "team 1",
+      "members": [
+        "Sho",
+        "Leo",
+        "Mia"
+      ],
+      "project_idea": "a homework reminder bot",
+      "needs_help": false
+    },
+    {
+      "team_name": "the coders",
+      "members": [
+        "Noah",
+        "Zoe"
+      ],
+      "project_idea": "an app that tells you what to eat",
+      "needs_help": true
+    },
+    {
+      "team_name": "not sure yet",
+      "members": [
+        "Emma",
+        "Liam",
+        "Ivy"
+      ],
+      "project_idea": "a game",
+      "needs_help": false
+    }
+  ]
+}

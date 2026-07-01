@@ -1,0 +1,17 @@
+{
+  "robot_id": "robot1",
+  "battery_percentage": 50,
+  "online": true,
+  "current_location": "living room",
+  "sensor_readings": {
+    "temperature_c": 22,
+    "dust_level": "high",
+    "bumped_into_something": true
+  },
+  "active_tasks": [
+    "vacuum floor",
+    "avoid the cat",
+    "go back to dock"
+  ],
+  "last_command_received": "clean the kitchen"
+}

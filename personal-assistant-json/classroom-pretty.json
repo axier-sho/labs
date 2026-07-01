@@ -1,0 +1,37 @@
+{
+  "class_name": "Intro to AI",
+  "room_number": "204",
+  "instructor": "Mr. Kim",
+  "number_of_students": 22,
+  "teams": [
+    {
+      "team_name": "team 1",
+      "members": [
+        "Sho",
+        "Leo",
+        "Mia"
+      ],
+      "project_idea": "a homework reminder bot",
+      "needs_help": false
+    },
+    {
+      "team_name": "the coders",
+      "members": [
+        "Noah",
+        "Zoe"
+      ],
+      "project_idea": "an app that tells you what to eat",
+      "needs_help": true
+    },
+    {
+      "team_name": "not sure yet",
+      "members": [
+        "Emma",
+        "Liam",
+        "Ivy"
+      ],
+      "project_idea": "a game",
+      "needs_help": false
+    }
+  ]
+}
