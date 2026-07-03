@@ -58,3 +58,21 @@ We both used basicly used the same command, which reflected how AI could think l
 
 ### How did Codex move from discovering the tool to using it through natural language?
 Codex read through the source code of fubar and understood how it works by also runing `--help` and runs the command with no mistake and giving final feedback at the end with English.
+
+## Stretch
+### What CRUD Means
+CRUD stands for the four basic operations for persistent data in software, which aree Create, Read, Update, Delete.
+
+### The Capability I Chose
+I chose to add a command that renames an existing room(Update) because rooms could be created and listed but not
+changed after creation.
+
+### Files Codex Changed
+- `src/commands/room.py` – added the new `rename` subcommand and the `--help` texts.
+- `src/storage.py` – added a function to update a room's name in storage.
+
+### How I Tested It
+By actually changing a existing room's name and checking if the change reflected in the database by listing the rooms. I also ran the command with `--help` option to see the generated help message.
+
+### What proved that it worked
+The command actually changed the room name as expected and the change was reflected in the database.
