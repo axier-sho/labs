@@ -37,8 +37,49 @@ export type HabitatRecord = {
 
 type RegisterResponse = {
   habitatId: string;
-  starterModules: unknown[];
-  blueprints: unknown[];
+  starterModules: StarterModuleInstance[];
+  blueprints: ProductionBlueprint[];
+};
+
+export type StarterModuleTemplate = {
+  blueprintId: string;
+  displayName: string;
+  runtimeAttributes: Record<string, unknown>;
+  capabilities: string[];
+};
+
+export type StarterModuleInstance = StarterModuleTemplate & {
+  id: string;
+  connectedTo: string[];
+};
+
+export type ProductionBlueprint = {
+  id: string;
+  blueprintId: string;
+  displayName: string;
+  description: string;
+  status: "draft" | "published";
+  output: Record<string, unknown>;
+  inputs: Record<string, unknown>;
+  productionCost?: Record<string, unknown>;
+  requiredFacility?: Record<string, unknown>;
+  buildTicks: number;
+  prerequisites?: string[];
+  unlocks?: string[];
+  repeatable: boolean;
+  level?: number | null;
+  target?: Record<string, unknown>;
+  facilityLevel?: Record<string, unknown>;
+  attachmentPoints?: Record<string, unknown>;
+  attachmentRequirements?: Array<Record<string, unknown>>;
+  runtimeAttributes: Record<string, unknown>;
+  capabilities: string[];
+  [key: string]: unknown;
+};
+
+export type BlueprintCatalogResponse = {
+  catalogVersion: string;
+  blueprints: ProductionBlueprint[];
 };
 
 export async function registerHabitat(name: string): Promise<{
@@ -84,6 +125,30 @@ export async function registerHabitat(name: string): Promise<{
   await writeRegistration(registration);
 
   return { registration, response };
+}
+
+export async function fetchBlueprintCatalog(
+  baseUrl?: string,
+): Promise<BlueprintCatalogResponse> {
+  const resolvedBaseUrl =
+    baseUrl !== undefined && baseUrl.trim() !== ""
+      ? baseUrl.replace(/\/+$/, "")
+      : resolveBaseUrl();
+
+  const body = (await request(
+    resolvedBaseUrl,
+    "GET",
+    "/catalog/blueprints",
+  )) as BlueprintCatalogResponse;
+
+  if (
+    typeof body?.catalogVersion !== "string" ||
+    !Array.isArray(body.blueprints)
+  ) {
+    throw new Error("Kepler returned no blueprint catalog.");
+  }
+
+  return body;
 }
 
 export async function fetchHabitatStatus(): Promise<{
