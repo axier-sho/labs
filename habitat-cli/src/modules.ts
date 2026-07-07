@@ -84,6 +84,12 @@ export async function listHabitatModules(): Promise<HabitatModule[]> {
   return cloneModules(state.modules);
 }
 
+export async function writeHabitatModules(
+  modules: HabitatModule[],
+): Promise<void> {
+  await writeModuleState({ modules: cloneModules(modules) });
+}
+
 export async function getHabitatModule(
   id: string,
 ): Promise<HabitatModule | null> {

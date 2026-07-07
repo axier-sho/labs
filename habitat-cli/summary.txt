@@ -1,0 +1,5 @@
+One tick = One simulated second. 3600 ticks are 1 h.
+Each module uses power based on its usage status. 
+Every tick, the battery loses that power.
+The battery stops at 0.
+Running 3600 ticks drains the battery by exactly the total kW of demand (e.g. 6.5 kW device drains 6.5 kWh per hour)

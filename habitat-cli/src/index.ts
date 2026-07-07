@@ -19,6 +19,15 @@ import {
   listHabitatModules,
   updateHabitatModule,
 } from "./modules";
+import { moduleDrawKw, runPowerTicks, totalDrawKw } from "./tick";
+
+const MODULE_STATUSES = [
+  "offline",
+  "idle",
+  "online",
+  "active",
+  "damaged",
+] as const;
 
 const program = new Command();
 
@@ -47,10 +56,13 @@ Commands:
   habitat register --name "<habitat name>"   register this habitat with Kepler
   habitat status                             show registration status
   habitat module list                        list local Habitat modules
+  habitat module status                      show module states and power draw
   habitat module show <module-id>            show one local Habitat module
   habitat module create --blueprint-id <id>  create a module from a blueprint
   habitat module update <module-id>          update a local Habitat module
+  habitat module set-status <id> <status>    set a module's runtime status
   habitat module delete <module-id>          delete a local Habitat module
+  habitat tick [count]                       advance the simulation by N ticks
   habitat unregister                         remove this habitat from Kepler
 
 Registration state:
@@ -74,10 +86,13 @@ Agent discovery:
   habitat status --help
   habitat module --help
   habitat module list --help
+  habitat module status --help
   habitat module show --help
   habitat module create --help
   habitat module update --help
+  habitat module set-status --help
   habitat module delete --help
+  habitat tick --help
   habitat unregister --help
 `,
 );
@@ -166,6 +181,43 @@ program
     }
   });
 
+program
+  .command("tick")
+  .description(
+    "Advance the habitat simulation by draining battery power (1 tick = 1 simulated second).",
+  )
+  .argument("[count]", "number of ticks to advance", "1")
+  .action(async (countArg: string) => {
+    try {
+      const count = parseTickCount(countArg);
+      const summary = await runPowerTicks(count);
+
+      const hours = summary.ticks / 3600;
+      console.log(
+        `Advanced ${summary.ticks} tick${summary.ticks === 1 ? "" : "s"} (${hours.toFixed(2)} simulated hours).`,
+      );
+      console.log(`Power draw: ${formatNumber(summary.powerDrawKw)} kW`);
+      console.log(
+        `Energy consumed: ${formatNumber(summary.energyConsumedKwh)} kWh`,
+      );
+
+      if (!summary.hasBattery) {
+        console.log("Battery: none (no power storage to drain).");
+        return;
+      }
+
+      console.log(
+        `Battery: ${formatNumber(summary.batteryEnergyKwh)} / ${formatNumber(summary.batteryCapacityKwh)} kWh remaining`,
+      );
+
+      if (summary.batteryEnergyKwh === 0) {
+        console.log("Battery depleted.");
+      }
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
 const moduleCommand = program
   .command("module")
   .description("Manage local Habitat module state.");
@@ -189,6 +241,42 @@ moduleCommand
           `${module.id} | ${module.blueprintId} | ${module.displayName}`,
         );
       }
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+moduleCommand
+  .command("status")
+  .description(
+    "Show each module's state and current power draw as a text table.",
+  )
+  .action(async () => {
+    try {
+      const modules = await listHabitatModules();
+
+      if (modules.length === 0) {
+        console.log("No local modules found.");
+        return;
+      }
+
+      const rows = modules.map((module) => [
+        module.displayName,
+        typeof module.runtimeAttributes.status === "string"
+          ? module.runtimeAttributes.status
+          : "unknown",
+        `${formatNumber(moduleDrawKw(module))} kW`,
+      ]);
+
+      console.log(renderTable(["Module", "State", "Power draw"], rows));
+
+      const total = totalDrawKw(modules);
+
+      console.log("");
+      console.log(`Total power draw: ${formatNumber(total)} kW`);
+      console.log(
+        `Energy per tick:  ${formatNumber(total / 3600)} kWh (1 tick = 1 simulated second)`,
+      );
     } catch (error) {
       reportError(error);
     }
@@ -286,6 +374,29 @@ moduleCommand
   );
 
 moduleCommand
+  .command("set-status")
+  .description("Set a local Habitat module's runtime status.")
+  .argument("<module-id>", "module identifier")
+  .argument("<status>", `new status (${MODULE_STATUSES.join(", ")})`)
+  .action(async (moduleId: string, status: string) => {
+    try {
+      if (!(MODULE_STATUSES as readonly string[]).includes(status)) {
+        throw new Error(
+          `Status must be one of: ${MODULE_STATUSES.join(", ")}.`,
+        );
+      }
+
+      const module = await updateHabitatModule(moduleId, { status });
+
+      console.log(
+        `Set ${module.id} status to '${status}' (power draw ${formatNumber(moduleDrawKw(module))} kW).`,
+      );
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+moduleCommand
   .command("delete")
   .description("Delete a local Habitat module.")
   .argument("<module-id>", "module identifier")
@@ -313,4 +424,40 @@ function parseCondition(value: string): number {
   }
 
   return parsed;
+}
+
+function parseTickCount(value: string): number {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error("Tick count must be a positive integer.");
+  }
+
+  return parsed;
+}
+
+function formatNumber(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+
+  // Show enough precision that sub-tick energy amounts (draw / 3600) are visible,
+  // then trim trailing zeros so common values stay readable (e.g. "6.5", "493.5").
+  return Number(value.toFixed(4)).toString();
+}
+
+function renderTable(headers: string[], rows: string[][]): string {
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...rows.map((row) => row[column]?.length ?? 0)),
+  );
+
+  const formatRow = (cells: string[]): string =>
+    cells
+      .map((cell, column) => cell.padEnd(widths[column] ?? 0))
+      .join("  ")
+      .trimEnd();
+
+  const divider = widths.map((width) => "-".repeat(width)).join("  ");
+
+  return [formatRow(headers), divider, ...rows.map(formatRow)].join("\n");
 }
