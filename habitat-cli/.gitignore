@@ -1,3 +1,5 @@
 node_modules/
 .env
 .habitat/
+AGENTS.md
+CLAUDE.md

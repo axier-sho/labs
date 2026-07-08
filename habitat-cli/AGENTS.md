@@ -42,3 +42,5 @@ If you add tests, keep them close to the code they cover and use clear `*.test.t
 ## Configuration Notes
 
 The CLI reads `KEPLER_BASE_URL`, `KEPLER_PLANET_TOKEN`, and `KEPLER_TOKEN`. Avoid hardcoding environment-specific values; use the existing resolver helpers in `src/kepler.ts`.
+
+For Kepler integration details, see the docs at https://planet.turingguild.com/docs and the OpenAPI contract at https://planet.turingguild.com/openapi.json.

@@ -82,6 +82,24 @@ export type BlueprintCatalogResponse = {
   blueprints: ProductionBlueprint[];
 };
 
+// A resource catalog entry describes a *type* of resource that can exist in the
+// Kepler world (GET /catalog/resources). It is reference data only: it does not
+// mean the habitat owns any of that resource.
+export type ResourceCatalogEntry = {
+  id: string;
+  resourceType: string;
+  displayName: string;
+  kind: string;
+  rarity: string;
+  description: string;
+  unit: string;
+};
+
+export type ResourceCatalogResponse = {
+  catalogVersion: string;
+  resources: ResourceCatalogEntry[];
+};
+
 export async function registerHabitat(name: string): Promise<{
   registration: Registration;
   response: RegisterResponse;
@@ -146,6 +164,30 @@ export async function fetchBlueprintCatalog(
     !Array.isArray(body.blueprints)
   ) {
     throw new Error("Kepler returned no blueprint catalog.");
+  }
+
+  return body;
+}
+
+export async function fetchResourceCatalog(
+  baseUrl?: string,
+): Promise<ResourceCatalogResponse> {
+  const resolvedBaseUrl =
+    baseUrl !== undefined && baseUrl.trim() !== ""
+      ? baseUrl.replace(/\/+$/, "")
+      : resolveBaseUrl();
+
+  const body = (await request(
+    resolvedBaseUrl,
+    "GET",
+    "/catalog/resources",
+  )) as ResourceCatalogResponse;
+
+  if (
+    typeof body?.catalogVersion !== "string" ||
+    !Array.isArray(body.resources)
+  ) {
+    throw new Error("Kepler returned no resource catalog.");
   }
 
   return body;
