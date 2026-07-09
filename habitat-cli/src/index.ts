@@ -2,7 +2,7 @@
 
 import { Command } from "commander";
 import packageJson from "../package.json";
-import { registrationPath } from "./kepler";
+import { databasePath } from "./kepler";
 import { registerRegistrationCommands } from "./commands/registration";
 import { registerModuleCommands } from "./commands/module";
 import { registerTickCommands } from "./commands/tick";
@@ -58,7 +58,7 @@ Commands:
   habitat unregister                         remove this habitat from Kepler
 
 Registration state:
-  Saved locally to ${registrationPath}
+  Saved locally in the SQLite database at ${databasePath}
   Run commands from the same directory to use the same registration.
 
 Module state:

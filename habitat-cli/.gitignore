@@ -1,6 +1,9 @@
 node_modules/
 .env
 .habitat/
+habitat.sqlite
+habitat.sqlite-shm
+habitat.sqlite-wal
 AGENTS.md
 CLAUDE.md
 lab-tasks/

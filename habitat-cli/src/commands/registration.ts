@@ -3,7 +3,7 @@ import {
   fetchHabitatStatus,
   readRegistration,
   registerHabitat,
-  registrationPath,
+  databasePath,
   unregisterHabitat,
 } from "../kepler";
 import {
@@ -32,7 +32,7 @@ export function registerRegistrationCommands(program: Command): void {
         console.log(`Habitat UUID: ${registration.habitatUuid}`);
         console.log(`Starter modules hydrated: ${response.starterModules.length}`);
         console.log(`Blueprints cached: ${response.blueprints.length}`);
-        console.log(`Saved registration to ${registrationPath}`);
+        console.log(`Saved registration to ${databasePath}`);
       } catch (error) {
         reportError(program, error);
       }
@@ -93,7 +93,7 @@ export function registerRegistrationCommands(program: Command): void {
         console.log(
           `Unregistered habitat '${registration.displayName}' (habitatId ${registration.habitatId}) from Kepler.`,
         );
-        console.log(`Removed local registration at ${registrationPath}`);
+        console.log(`Removed local registration from ${databasePath}`);
       } catch (error) {
         reportError(program, error);
       }

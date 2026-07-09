@@ -1,5 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { getDb, databasePath } from "./db";
 
 // Kepler planet server contract (see https://planet.turingguild.com/docs and
 // /openapi.json). All habitat endpoints use bearer auth:
@@ -9,13 +8,10 @@ import { dirname, join } from "node:path";
 const DEFAULT_BASE_URL = "https://planet.turingguild.com";
 const DEFAULT_TOKEN = "admin-dev-token";
 
-// Local registration state lives beside the habitat data file so both share the
-// project's .habitat directory.
-export const registrationPath = join(
-  process.cwd(),
-  ".habitat",
-  "registration.json",
-);
+// Local registration state now lives in the CLI-owned SQLite database
+// (see src/db.ts). `databasePath` is re-exported so commands can tell the user
+// where their local state is kept.
+export { databasePath };
 
 export type Registration = {
   habitatId: string;
@@ -273,27 +269,14 @@ export async function unregisterHabitat(): Promise<Registration> {
 }
 
 export async function readRegistration(): Promise<Registration | null> {
-  const file = Bun.file(registrationPath);
+  const row = getDb()
+    .query(
+      "SELECT habitatId, habitatUuid, displayName, baseUrl, registeredAt " +
+        "FROM registration WHERE id = 1",
+    )
+    .get() as Registration | null;
 
-  if (!(await file.exists())) {
-    return null;
-  }
-
-  const contents = await file.text();
-
-  if (contents.trim() === "") {
-    return null;
-  }
-
-  const parsed = JSON.parse(contents) as Record<string, unknown>;
-
-  return {
-    habitatId: readString(parsed.habitatId, "habitatId"),
-    habitatUuid: readString(parsed.habitatUuid, "habitatUuid"),
-    displayName: readString(parsed.displayName, "displayName"),
-    baseUrl: readString(parsed.baseUrl, "baseUrl"),
-    registeredAt: readString(parsed.registeredAt, "registeredAt"),
-  };
+  return row ?? null;
 }
 
 async function requireRegistration(): Promise<Registration> {
@@ -310,15 +293,28 @@ async function requireRegistration(): Promise<Registration> {
 }
 
 async function writeRegistration(registration: Registration): Promise<void> {
-  await mkdir(dirname(registrationPath), { recursive: true });
-  await Bun.write(
-    registrationPath,
-    `${JSON.stringify(registration, null, 2)}\n`,
+  getDb().run(
+    "INSERT INTO registration " +
+      "(id, habitatId, habitatUuid, displayName, baseUrl, registeredAt) " +
+      "VALUES (1, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET " +
+      "habitatId = excluded.habitatId, " +
+      "habitatUuid = excluded.habitatUuid, " +
+      "displayName = excluded.displayName, " +
+      "baseUrl = excluded.baseUrl, " +
+      "registeredAt = excluded.registeredAt",
+    [
+      registration.habitatId,
+      registration.habitatUuid,
+      registration.displayName,
+      registration.baseUrl,
+      registration.registeredAt,
+    ],
   );
 }
 
 async function clearRegistration(): Promise<void> {
-  await rm(registrationPath, { force: true });
+  getDb().run("DELETE FROM registration WHERE id = 1");
 }
 
 async function request(
@@ -397,12 +393,4 @@ function resolveToken(): string {
   )?.trim();
 
   return value !== undefined && value !== "" ? value : DEFAULT_TOKEN;
-}
-
-function readString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`${registrationPath} field '${field}' must be a string.`);
-  }
-
-  return value;
 }
