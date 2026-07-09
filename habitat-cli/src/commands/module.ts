@@ -8,8 +8,10 @@ import {
   updateHabitatModule,
 } from "../modules";
 import { moduleDrawKw, totalDrawKw } from "../tick";
+import { readConstructionJob, type ConstructionJob } from "../construction";
 import { formatNumber, renderTable } from "../format";
 import { parseCondition, reportError } from "../cli";
+import type { HabitatModule } from "../modules";
 
 const MODULE_STATUSES = [
   "offline",
@@ -96,7 +98,7 @@ export function registerModuleCommands(program: Command): void {
           throw new Error(`Module '${moduleId}' was not found.`);
         }
 
-        console.log(JSON.stringify(module, null, 2));
+        printModuleDetails(module);
       } catch (error) {
         reportError(program, error);
       }
@@ -198,6 +200,7 @@ export function registerModuleCommands(program: Command): void {
       }
     });
 
+  // (delete stays a simple, id-based operation.)
   moduleCommand
     .command("delete")
     .description("Delete a local Habitat module.")
@@ -211,4 +214,63 @@ export function registerModuleCommands(program: Command): void {
         reportError(program, error);
       }
     });
+}
+
+// Render one module as a readable summary. A construction job (stored on the
+// facility's runtime attributes) is surfaced as its own block so a beginner can
+// see the build progress without reading raw JSON; the remaining attributes are
+// still printed for completeness.
+function printModuleDetails(module: HabitatModule): void {
+  const job = readConstructionJob(module);
+  const status =
+    typeof module.runtimeAttributes.status === "string"
+      ? module.runtimeAttributes.status
+      : "unknown";
+
+  console.log(`Module:       ${module.id}`);
+  console.log(`Blueprint:    ${module.blueprintId}`);
+  console.log(`Display name: ${module.displayName}`);
+  console.log(`Status:       ${status}`);
+  console.log(`Power draw:   ${formatNumber(moduleDrawKw(module))} kW (at current status)`);
+  console.log(
+    `Capabilities: ${module.capabilities.length > 0 ? module.capabilities.join(", ") : "none"}`,
+  );
+
+  if (job !== null) {
+    printConstructionJob(job);
+  }
+
+  const attributes = attributesWithoutJob(module);
+
+  console.log("");
+  console.log("Runtime attributes:");
+  console.log(indent(JSON.stringify(attributes, null, 2)));
+}
+
+function printConstructionJob(job: ConstructionJob): void {
+  const done = job.buildTicks - job.remainingTicks;
+
+  console.log("");
+  console.log("Active construction job:");
+  console.log(`  Building:  ${job.outputModuleType} -> ${job.outputModuleId}`);
+  console.log(`  Blueprint: ${job.blueprintId}`);
+  console.log(
+    `  Progress:  ${done} / ${job.buildTicks} ticks done, ${job.remainingTicks} remaining`,
+  );
+}
+
+function attributesWithoutJob(
+  module: HabitatModule,
+): Record<string, unknown> {
+  const { constructionJob: _constructionJob, ...rest } =
+    module.runtimeAttributes as Record<string, unknown>;
+
+  return rest;
+}
+
+function indent(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
 }

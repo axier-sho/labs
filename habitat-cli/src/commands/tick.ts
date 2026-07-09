@@ -33,8 +33,32 @@ export function registerTickCommands(program: Command): void {
           `Battery: ${formatNumber(summary.batteryEnergyKwh)} / ${formatNumber(summary.batteryCapacityKwh)} kWh remaining`,
         );
 
+        if (summary.solarGeneratedKwh > 0) {
+          const sky =
+            summary.solarWPerM2 !== null
+              ? ` (${formatNumber(summary.solarWPerM2)} W/m^2${summary.solarCondition ? `, ${summary.solarCondition}` : ""})`
+              : "";
+          console.log(
+            `Solar generated: ${formatNumber(summary.solarGeneratedKwh)} kWh${sky}`,
+          );
+        } else if (summary.solarSkipReason !== null) {
+          console.log(`Solar generated: none — ${summary.solarSkipReason}.`);
+        }
+
         if (summary.batteryEnergyKwh === 0) {
           console.log("Battery depleted.");
+        }
+
+        if (summary.constructionStalled) {
+          console.log(
+            "Construction stalled: no usable battery power. Jobs resume once the battery recovers above its reserve.",
+          );
+        }
+
+        for (const completion of summary.completions) {
+          console.log(
+            `Construction complete: ${completion.moduleId} (${completion.moduleType}) is online. ${completion.facilityId} is available again.`,
+          );
         }
       } catch (error) {
         reportError(program, error);

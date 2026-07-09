@@ -7,6 +7,9 @@ import { registerRegistrationCommands } from "./commands/registration";
 import { registerModuleCommands } from "./commands/module";
 import { registerTickCommands } from "./commands/tick";
 import { registerCatalogCommands } from "./commands/catalog";
+import { registerInventoryCommands } from "./commands/inventory";
+import { registerConstructionCommands } from "./commands/construction";
+import { registerSolarCommands } from "./commands/solar";
 
 const program = new Command();
 
@@ -42,6 +45,13 @@ Commands:
   habitat module set-status <id> <status>    set a module's runtime status
   habitat module delete <module-id>          delete a local Habitat module
   habitat tick [count]                       advance the simulation by N ticks
+  habitat solar status                       show current solar irradiance from Kepler
+  habitat inventory list                     list local materials on hand
+  habitat inventory add <resource> <qty>     add materials to local inventory
+  habitat construct <blueprint-id>           start construction from a blueprint
+  habitat construct <blueprint-id> --dry-run check readiness without changing state
+  habitat construction status                show active construction jobs
+  habitat construction cancel <facility-id>  cancel a facility's construction job
   habitat blueprint list                     list blueprints in the Kepler catalog
   habitat blueprint show <blueprint-id>      show one Kepler blueprint's details
   habitat resource list                      list resource types in the Kepler catalog
@@ -75,6 +85,13 @@ Agent discovery:
   habitat module set-status --help
   habitat module delete --help
   habitat tick --help
+  habitat inventory --help
+  habitat inventory list --help
+  habitat inventory add --help
+  habitat construct --help
+  habitat construction --help
+  habitat construction status --help
+  habitat construction cancel --help
   habitat blueprint --help
   habitat blueprint list --help
   habitat blueprint show --help
@@ -92,5 +109,8 @@ registerRegistrationCommands(program);
 registerTickCommands(program);
 registerModuleCommands(program);
 registerCatalogCommands(program);
+registerInventoryCommands(program);
+registerConstructionCommands(program);
+registerSolarCommands(program);
 
 await program.parseAsync();

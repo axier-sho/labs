@@ -90,6 +90,16 @@ export async function writeHabitatModules(
   await writeModuleState({ modules: cloneModules(modules) });
 }
 
+// Reserve the id the next module built from `sourceId` would receive, without
+// creating the module. Construction uses this to record its output module id up
+// front while the build is still in progress.
+export function allocateModuleId(
+  modules: HabitatModule[],
+  sourceId: string,
+): string {
+  return createSequentialModuleId(modules, sourceId);
+}
+
 export async function getHabitatModule(
   id: string,
 ): Promise<HabitatModule | null> {

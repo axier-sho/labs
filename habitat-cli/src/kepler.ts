@@ -100,6 +100,18 @@ export type ResourceCatalogResponse = {
   resources: ResourceCatalogEntry[];
 };
 
+// The planet server owns the environmental sunlight reading
+// (GET /world/solar-irradiance). `wPerM2` is the usable irradiance in watts per
+// square metre; `condition` is a human-readable label such as "clear" or "dust".
+export type SolarIrradiance = {
+  wPerM2: number;
+  condition: string;
+};
+
+export type SolarIrradianceResponse = {
+  solarIrradiance: SolarIrradiance;
+};
+
 export async function registerHabitat(name: string): Promise<{
   registration: Registration;
   response: RegisterResponse;
@@ -191,6 +203,40 @@ export async function fetchResourceCatalog(
   }
 
   return body;
+}
+
+export async function fetchSolarIrradiance(
+  baseUrl?: string,
+): Promise<SolarIrradiance> {
+  const resolvedBaseUrl =
+    baseUrl !== undefined && baseUrl.trim() !== ""
+      ? baseUrl.replace(/\/+$/, "")
+      : resolveBaseUrl();
+
+  const body = (await request(
+    resolvedBaseUrl,
+    "GET",
+    "/world/solar-irradiance",
+  )) as SolarIrradianceResponse;
+
+  const irradiance = body?.solarIrradiance;
+
+  if (
+    typeof irradiance !== "object" ||
+    irradiance === null ||
+    typeof irradiance.wPerM2 !== "number" ||
+    !Number.isFinite(irradiance.wPerM2)
+  ) {
+    throw new Error("Kepler returned no usable solar irradiance reading.");
+  }
+
+  return {
+    wPerM2: irradiance.wPerM2,
+    condition:
+      typeof irradiance.condition === "string" && irradiance.condition !== ""
+        ? irradiance.condition
+        : "unknown",
+  };
 }
 
 export async function fetchHabitatStatus(): Promise<{
