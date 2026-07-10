@@ -1,13 +1,12 @@
 import type { Command } from "commander";
-import { readRegistration } from "../kepler";
 import {
-  cancelConstruction,
-  evaluateConstruction,
   formatResourceMap,
-  listActiveConstructions,
-  startConstruction,
+  type ActiveConstruction,
   type ConstructionEvaluation,
+  type ConstructionJob,
+  type StartConstructionResult,
 } from "../construction";
+import { apiDelete, apiGet, apiPost } from "../api-client";
 import { reportError } from "../cli";
 
 export function registerConstructionCommands(program: Command): void {
@@ -20,7 +19,9 @@ export function registerConstructionCommands(program: Command): void {
     .description("Show active construction jobs and remaining build time.")
     .action(async () => {
       try {
-        const active = await listActiveConstructions();
+        const { active } = await apiGet<{ active: ActiveConstruction[] }>(
+          "/construction",
+        );
 
         if (active.length === 0) {
           console.log("No active construction jobs.");
@@ -54,7 +55,9 @@ export function registerConstructionCommands(program: Command): void {
     .argument("<facility-id>", "facility module id, e.g. workshop-fabricator-1")
     .action(async (facilityId: string) => {
       try {
-        const { job } = await cancelConstruction(facilityId);
+        const { job } = await apiDelete<{ job: ConstructionJob }>(
+          `/construction/${encodeURIComponent(facilityId)}`,
+        );
 
         console.log(`Construction canceled on ${facilityId}.`);
         console.log(
@@ -82,20 +85,17 @@ export function registerConstructionCommands(program: Command): void {
     )
     .action(async (blueprintId: string, options: { dryRun?: boolean }) => {
       try {
-        const registration = await readRegistration();
-
         if (options.dryRun) {
-          const evaluation = await evaluateConstruction(
-            blueprintId,
-            registration?.baseUrl,
-          );
+          const { evaluation } = await apiPost<{
+            evaluation: ConstructionEvaluation;
+          }>("/construction", { blueprintId, dryRun: true });
           printDryRun(evaluation);
           return;
         }
 
-        const { facilityId, job } = await startConstruction(
-          blueprintId,
-          registration?.baseUrl,
+        const { facilityId, job } = await apiPost<StartConstructionResult>(
+          "/construction",
+          { blueprintId },
         );
 
         console.log(`Construction started: ${job.blueprintId}`);

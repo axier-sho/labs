@@ -1,0 +1,463 @@
+import { Hono } from "hono";
+import {
+  fetchBlueprintCatalog,
+  fetchHabitatStatus,
+  fetchResourceCatalog,
+  fetchSolarIrradiance,
+  readRegistration,
+  registerHabitat,
+  unregisterHabitat,
+} from "../kepler";
+import { showBlueprint } from "../catalog";
+import {
+  clearBlueprintCatalog,
+  clearHabitatModuleState,
+  createHabitatModule,
+  deleteHabitatModule,
+  getHabitatModule,
+  hydrateModulesFromRegistration,
+  listHabitatModules,
+  updateHabitatModule,
+} from "../modules";
+import { addInventory, listInventory } from "../inventory";
+import { runPowerTicks } from "../tick";
+import {
+  cancelConstruction,
+  evaluateConstruction,
+  listActiveConstructions,
+  startConstruction,
+} from "../construction";
+
+// The Hono backend is the REST boundary the CLI talks to. It — not the CLI —
+// owns the local SQLite state and all Kepler transport. This keeps the CLI
+// portable: point HABITAT_API_BASE_URL at a different host and the same CLI
+// keeps working.
+//
+// Routes return JSON, never terminal-formatted text. Human-friendly formatting
+// stays on the CLI side.
+export function createApp() {
+  const app = new Hono();
+
+  // GET /registration -> the local registration record, or null if this
+  // habitat has not registered yet.
+  app.get("/registration", async (c) => {
+    const registration = await readRegistration();
+    console.log(
+      `[habitat-api] GET /registration -> ${
+        registration === null ? "not registered" : "registered"
+      }`,
+    );
+    return c.json({ registration });
+  });
+
+  // POST /registration { name } -> register with Kepler, persist to SQLite, and
+  // hydrate starter modules + blueprint catalog. The backend owns every side
+  // effect here; the CLI just reports the returned summary to the user.
+  app.post("/registration", async (c) => {
+    let body: { name?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /registration -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON with a 'name'." }, 400);
+    }
+
+    const name = typeof body.name === "string" ? body.name : "";
+
+    try {
+      const { registration, response } = await registerHabitat(name);
+      await hydrateModulesFromRegistration({
+        starterModules: response.starterModules,
+        blueprints: response.blueprints,
+      });
+
+      console.log(
+        `[habitat-api] POST /registration -> registered ${registration.habitatId}`,
+      );
+      return c.json(
+        {
+          registration,
+          summary: {
+            starterModulesHydrated: response.starterModules.length,
+            blueprintsCached: response.blueprints.length,
+          },
+        },
+        201,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] POST /registration -> 400 register failed");
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  // DELETE /registration -> unregister from Kepler and clear local state.
+  app.delete("/registration", async (c) => {
+    try {
+      const registration = await unregisterHabitat();
+      await clearHabitatModuleState();
+      await clearBlueprintCatalog();
+
+      console.log(
+        `[habitat-api] DELETE /registration -> removed ${registration.habitatId}`,
+      );
+      return c.json({ registration });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] DELETE /registration -> 400 unregister failed");
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  // GET /status -> registration plus the live Kepler habitat record. When the
+  // habitat is registered locally but Kepler is unreachable, `reachable` is
+  // false and `habitat` is null so the CLI can still show the local record.
+  app.get("/status", async (c) => {
+    const registration = await readRegistration();
+    const modules = await listHabitatModules();
+
+    if (registration === null) {
+      console.log("[habitat-api] GET /status -> not registered");
+      return c.json({
+        registration: null,
+        habitat: null,
+        reachable: false,
+        modules: modules.length,
+      });
+    }
+
+    try {
+      const { habitat } = await fetchHabitatStatus();
+      console.log("[habitat-api] GET /status -> registered, Kepler ok");
+      return c.json({
+        registration,
+        habitat,
+        reachable: true,
+        modules: modules.length,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] GET /status -> registered, Kepler unreachable");
+      return c.json({
+        registration,
+        habitat: null,
+        reachable: false,
+        modules: modules.length,
+        error: message,
+      });
+    }
+  });
+
+  // --- Kepler catalog + solar reads (proxied) -----------------------------
+  // The backend is the only part that knows how to reach Kepler. The CLI asks
+  // for reference data here and formats it locally. Catalog data is never
+  // hard-coded — it is always fetched fresh from the planet server.
+
+  // GET /catalog/blueprints -> the full Kepler blueprint catalog.
+  app.get("/catalog/blueprints", async (c) => {
+    try {
+      const catalog = await fetchBlueprintCatalog();
+      console.log(
+        `[habitat-api] GET /catalog/blueprints -> proxied to Kepler (${catalog.blueprints.length} blueprints)`,
+      );
+      return c.json(catalog);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] GET /catalog/blueprints -> 502 Kepler error");
+      return c.json({ error: message }, 502);
+    }
+  });
+
+  // GET /catalog/blueprints/:blueprintId -> one blueprint, or 404.
+  app.get("/catalog/blueprints/:blueprintId", async (c) => {
+    const blueprintId = c.req.param("blueprintId");
+    try {
+      const blueprint = await showBlueprint(blueprintId);
+      console.log(
+        `[habitat-api] GET /catalog/blueprints/${blueprintId} -> proxied to Kepler`,
+      );
+      return c.json({ blueprint });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(
+        `[habitat-api] GET /catalog/blueprints/${blueprintId} -> 404 not found`,
+      );
+      return c.json({ error: message }, 404);
+    }
+  });
+
+  // GET /catalog/resources -> the full Kepler resource-type catalog.
+  app.get("/catalog/resources", async (c) => {
+    try {
+      const catalog = await fetchResourceCatalog();
+      console.log(
+        `[habitat-api] GET /catalog/resources -> proxied to Kepler (${catalog.resources.length} resources)`,
+      );
+      return c.json(catalog);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] GET /catalog/resources -> 502 Kepler error");
+      return c.json({ error: message }, 502);
+    }
+  });
+
+  // GET /solar/irradiance -> the planet's current sunlight reading.
+  app.get("/solar/irradiance", async (c) => {
+    try {
+      const solarIrradiance = await fetchSolarIrradiance();
+      console.log(
+        `[habitat-api] GET /solar/irradiance -> proxied to Kepler (${solarIrradiance.wPerM2} W/m^2)`,
+      );
+      return c.json({ solarIrradiance });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] GET /solar/irradiance -> 502 Kepler error");
+      return c.json({ error: message }, 502);
+    }
+  });
+
+  // --- Local module state (SQLite-owned by the backend) -------------------
+  // The CLI keeps command-level validation and formatting, but the backend is
+  // now the only writer of local module state.
+
+  // GET /modules -> all local modules.
+  app.get("/modules", async (c) => {
+    const modules = await listHabitatModules();
+    console.log(`[habitat-api] GET /modules -> ${modules.length} modules`);
+    return c.json({ modules });
+  });
+
+  // GET /modules/:id -> one local module, or 404.
+  app.get("/modules/:id", async (c) => {
+    const id = c.req.param("id");
+    const module = await getHabitatModule(id);
+
+    if (module === null) {
+      console.log(`[habitat-api] GET /modules/${id} -> 404 not found`);
+      return c.json({ error: `Module '${id}' was not found.` }, 404);
+    }
+
+    console.log(`[habitat-api] GET /modules/${id} -> found`);
+    return c.json({ module });
+  });
+
+  // POST /modules { blueprintId, displayName? } -> create from a blueprint.
+  // The backend supplies Kepler's base URL from the local registration, so the
+  // CLI never has to know how to reach Kepler.
+  app.post("/modules", async (c) => {
+    let body: { blueprintId?: unknown; displayName?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /modules -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (typeof body.blueprintId !== "string" || body.blueprintId === "") {
+      console.log("[habitat-api] POST /modules -> 400 missing blueprintId");
+      return c.json({ error: "A 'blueprintId' string is required." }, 400);
+    }
+
+    try {
+      const registration = await readRegistration();
+      const module = await createHabitatModule({
+        blueprintId: body.blueprintId,
+        displayName:
+          typeof body.displayName === "string" ? body.displayName : undefined,
+        baseUrl: registration?.baseUrl,
+      });
+
+      console.log(`[habitat-api] POST /modules -> created ${module.id}`);
+      return c.json({ module }, 201);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] POST /modules -> 400 create failed");
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  // PATCH /modules/:id { displayName?, connectedTo?, status?, condition? }
+  app.patch("/modules/:id", async (c) => {
+    const id = c.req.param("id");
+
+    let patch: {
+      displayName?: string;
+      connectedTo?: string[];
+      status?: string;
+      condition?: number;
+    };
+    try {
+      patch = await c.req.json();
+    } catch {
+      console.log(`[habitat-api] PATCH /modules/${id} -> 400 invalid JSON`);
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    try {
+      const module = await updateHabitatModule(id, patch);
+      console.log(`[habitat-api] PATCH /modules/${id} -> updated`);
+      return c.json({ module });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.includes("was not found") ? 404 : 400;
+      console.log(`[habitat-api] PATCH /modules/${id} -> ${status}`);
+      return c.json({ error: message }, status);
+    }
+  });
+
+  // DELETE /modules/:id -> remove one module, or 404.
+  app.delete("/modules/:id", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const module = await deleteHabitatModule(id);
+      console.log(`[habitat-api] DELETE /modules/${id} -> deleted`);
+      return c.json({ module });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.includes("was not found") ? 404 : 400;
+      console.log(`[habitat-api] DELETE /modules/${id} -> ${status}`);
+      return c.json({ error: message }, status);
+    }
+  });
+
+  // --- Local inventory state (SQLite-owned by the backend) ----------------
+
+  // GET /inventory -> all local material stacks.
+  app.get("/inventory", async (c) => {
+    const inventory = await listInventory();
+    console.log(`[habitat-api] GET /inventory -> ${inventory.length} entries`);
+    return c.json({ inventory });
+  });
+
+  // POST /inventory { resource, quantity } -> add materials. Quantity is
+  // validated on the CLI side; the backend applies the change to local state.
+  app.post("/inventory", async (c) => {
+    let body: { resource?: unknown; quantity?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /inventory -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (typeof body.resource !== "string" || body.resource === "") {
+      console.log("[habitat-api] POST /inventory -> 400 missing resource");
+      return c.json({ error: "A 'resource' string is required." }, 400);
+    }
+    if (typeof body.quantity !== "number") {
+      console.log("[habitat-api] POST /inventory -> 400 missing quantity");
+      return c.json({ error: "A numeric 'quantity' is required." }, 400);
+    }
+
+    try {
+      const entry = await addInventory(body.resource, body.quantity);
+      console.log(
+        `[habitat-api] POST /inventory -> ${entry.resource} now ${entry.quantity}`,
+      );
+      return c.json({ entry });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] POST /inventory -> 400 add failed");
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  // --- Simulation: power ticks + construction -----------------------------
+  // These are domain operations, so they use action-shaped routes. The backend
+  // runs the simulation (reading/writing local state and fetching Kepler solar
+  // data); the CLI keeps the human-facing formatting.
+
+  // POST /ticks { count } -> advance the power/construction simulation.
+  app.post("/ticks", async (c) => {
+    let body: { count?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /ticks -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    const count = typeof body.count === "number" ? body.count : NaN;
+
+    try {
+      const summary = await runPowerTicks(count);
+      console.log(`[habitat-api] POST /ticks -> advanced ${summary.ticks} ticks`);
+      return c.json({ summary });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] POST /ticks -> 400 tick failed");
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  // GET /construction -> active construction jobs.
+  app.get("/construction", async (c) => {
+    const active = await listActiveConstructions();
+    console.log(`[habitat-api] GET /construction -> ${active.length} active`);
+    return c.json({ active });
+  });
+
+  // POST /construction { blueprintId, dryRun? } -> evaluate readiness (dry run)
+  // or actually start a construction job. Kepler's base URL comes from the
+  // local registration, so the CLI never talks to Kepler itself.
+  app.post("/construction", async (c) => {
+    let body: { blueprintId?: unknown; dryRun?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /construction -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (typeof body.blueprintId !== "string" || body.blueprintId === "") {
+      console.log("[habitat-api] POST /construction -> 400 missing blueprintId");
+      return c.json({ error: "A 'blueprintId' string is required." }, 400);
+    }
+
+    const registration = await readRegistration();
+    const baseUrl = registration?.baseUrl;
+
+    try {
+      if (body.dryRun === true) {
+        const evaluation = await evaluateConstruction(body.blueprintId, baseUrl);
+        console.log(
+          `[habitat-api] POST /construction (dry-run) -> ${
+            evaluation.canStart ? "can start" : "cannot start"
+          }`,
+        );
+        return c.json({ evaluation });
+      }
+
+      const result = await startConstruction(body.blueprintId, baseUrl);
+      console.log(
+        `[habitat-api] POST /construction -> started on ${result.facilityId}`,
+      );
+      return c.json(result, 201);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log("[habitat-api] POST /construction -> 400 construction failed");
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  // DELETE /construction/:facilityId -> cancel a facility's construction job.
+  app.delete("/construction/:facilityId", async (c) => {
+    const facilityId = c.req.param("facilityId");
+    try {
+      const result = await cancelConstruction(facilityId);
+      console.log(
+        `[habitat-api] DELETE /construction/${facilityId} -> canceled`,
+      );
+      return c.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.includes("was not found") ? 404 : 400;
+      console.log(
+        `[habitat-api] DELETE /construction/${facilityId} -> ${status}`,
+      );
+      return c.json({ error: message }, status);
+    }
+  });
+
+  return app;
+}

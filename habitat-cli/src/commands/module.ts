@@ -1,17 +1,25 @@
 import type { Command } from "commander";
-import { readRegistration } from "../kepler";
-import {
-  createHabitatModule,
-  deleteHabitatModule,
-  getHabitatModule,
-  listHabitatModules,
-  updateHabitatModule,
-} from "../modules";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../api-client";
 import { moduleDrawKw, totalDrawKw } from "../tick";
 import { readConstructionJob, type ConstructionJob } from "../construction";
 import { formatNumber, renderTable } from "../format";
 import { parseCondition, reportError } from "../cli";
 import type { HabitatModule } from "../modules";
+
+// Local module state now lives behind the backend. These helpers keep the HTTP
+// shape in one place; the command handlers below still own validation and the
+// human-facing output (including the power-draw maths, which is pure).
+async function fetchModules(): Promise<HabitatModule[]> {
+  const { modules } = await apiGet<{ modules: HabitatModule[] }>("/modules");
+  return modules;
+}
+
+async function fetchModule(id: string): Promise<HabitatModule> {
+  const { module } = await apiGet<{ module: HabitatModule }>(
+    `/modules/${encodeURIComponent(id)}`,
+  );
+  return module;
+}
 
 const MODULE_STATUSES = [
   "offline",
@@ -31,7 +39,7 @@ export function registerModuleCommands(program: Command): void {
     .description("List local Habitat modules.")
     .action(async () => {
       try {
-        const modules = await listHabitatModules();
+        const modules = await fetchModules();
 
         console.log(`Modules: ${modules.length}`);
 
@@ -57,7 +65,7 @@ export function registerModuleCommands(program: Command): void {
     )
     .action(async () => {
       try {
-        const modules = await listHabitatModules();
+        const modules = await fetchModules();
 
         if (modules.length === 0) {
           console.log("No local modules found.");
@@ -92,11 +100,7 @@ export function registerModuleCommands(program: Command): void {
     .argument("<module-id>", "module identifier")
     .action(async (moduleId: string) => {
       try {
-        const module = await getHabitatModule(moduleId);
-
-        if (module === null) {
-          throw new Error(`Module '${moduleId}' was not found.`);
-        }
+        const module = await fetchModule(moduleId);
 
         printModuleDetails(module);
       } catch (error) {
@@ -114,12 +118,13 @@ export function registerModuleCommands(program: Command): void {
       displayName?: string;
     }) => {
       try {
-        const registration = await readRegistration();
-        const module = await createHabitatModule({
-          blueprintId: options.blueprintId,
-          displayName: options.displayName,
-          baseUrl: registration?.baseUrl,
-        });
+        const { module } = await apiPost<{ module: HabitatModule }>(
+          "/modules",
+          {
+            blueprintId: options.blueprintId,
+            displayName: options.displayName,
+          },
+        );
 
         console.log(
           `Created module '${module.displayName}' (${module.id}) from blueprint '${module.blueprintId}'.`,
@@ -160,15 +165,18 @@ export function registerModuleCommands(program: Command): void {
             throw new Error("Provide at least one field to update.");
           }
 
-          const module = await updateHabitatModule(moduleId, {
-            displayName: options.displayName,
-            connectedTo: options.connectedTo,
-            status: options.status,
-            condition:
-              options.condition === undefined
-                ? undefined
-                : parseCondition(options.condition),
-          });
+          const { module } = await apiPatch<{ module: HabitatModule }>(
+            `/modules/${encodeURIComponent(moduleId)}`,
+            {
+              displayName: options.displayName,
+              connectedTo: options.connectedTo,
+              status: options.status,
+              condition:
+                options.condition === undefined
+                  ? undefined
+                  : parseCondition(options.condition),
+            },
+          );
 
           console.log(`Updated module '${module.displayName}' (${module.id}).`);
         } catch (error) {
@@ -190,7 +198,10 @@ export function registerModuleCommands(program: Command): void {
           );
         }
 
-        const module = await updateHabitatModule(moduleId, { status });
+        const { module } = await apiPatch<{ module: HabitatModule }>(
+          `/modules/${encodeURIComponent(moduleId)}`,
+          { status },
+        );
 
         console.log(
           `Set ${module.id} status to '${status}' (power draw ${formatNumber(moduleDrawKw(module))} kW).`,
@@ -207,7 +218,9 @@ export function registerModuleCommands(program: Command): void {
     .argument("<module-id>", "module identifier")
     .action(async (moduleId: string) => {
       try {
-        const module = await deleteHabitatModule(moduleId);
+        const { module } = await apiDelete<{ module: HabitatModule }>(
+          `/modules/${encodeURIComponent(moduleId)}`,
+        );
 
         console.log(`Deleted module '${module.displayName}' (${module.id}).`);
       } catch (error) {

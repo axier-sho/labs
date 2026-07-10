@@ -1,5 +1,6 @@
 import type { Command } from "commander";
-import { runPowerTicks } from "../tick";
+import type { TickSummary } from "../tick";
+import { apiPost } from "../api-client";
 import { formatNumber } from "../format";
 import { parseTickCount, reportError } from "../cli";
 
@@ -13,7 +14,9 @@ export function registerTickCommands(program: Command): void {
     .action(async (countArg: string) => {
       try {
         const count = parseTickCount(countArg);
-        const summary = await runPowerTicks(count);
+        const { summary } = await apiPost<{ summary: TickSummary }>("/ticks", {
+          count,
+        });
 
         const hours = summary.ticks / 3600;
         console.log(

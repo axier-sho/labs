@@ -1,5 +1,6 @@
 import type { Command } from "commander";
-import { addInventory, listInventory } from "../inventory";
+import type { InventoryEntry } from "../inventory";
+import { apiGet, apiPost } from "../api-client";
 import { formatNumber, renderTable } from "../format";
 import { reportError } from "../cli";
 
@@ -13,7 +14,9 @@ export function registerInventoryCommands(program: Command): void {
     .description("List the materials currently held in local inventory.")
     .action(async () => {
       try {
-        const entries = await listInventory();
+        const { inventory: entries } = await apiGet<{
+          inventory: InventoryEntry[];
+        }>("/inventory");
 
         if (entries.length === 0) {
           console.log("Inventory is empty. Add materials with 'habitat inventory add <resource> <quantity>'.");
@@ -39,7 +42,10 @@ export function registerInventoryCommands(program: Command): void {
     .action(async (resource: string, quantityArg: string) => {
       try {
         const quantity = parseQuantity(quantityArg);
-        const entry = await addInventory(resource, quantity);
+        const { entry } = await apiPost<{ entry: InventoryEntry }>(
+          "/inventory",
+          { resource, quantity },
+        );
 
         console.log(
           `Added ${formatNumber(quantity)} ${entry.resource}. New total: ${formatNumber(entry.quantity)}.`,

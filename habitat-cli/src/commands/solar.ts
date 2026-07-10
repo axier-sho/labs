@@ -1,5 +1,6 @@
 import type { Command } from "commander";
-import { fetchSolarIrradiance } from "../kepler";
+import type { SolarIrradiance } from "../kepler";
+import { apiGet } from "../api-client";
 import { formatNumber } from "../format";
 import { reportError } from "../cli";
 
@@ -17,7 +18,9 @@ export function registerSolarCommands(program: Command): void {
     .description("Show the current solar irradiance and sky condition.")
     .action(async () => {
       try {
-        const irradiance = await fetchSolarIrradiance();
+        const { solarIrradiance: irradiance } = await apiGet<{
+          solarIrradiance: SolarIrradiance;
+        }>("/solar/irradiance");
         const percentOfClearDay = Math.round(
           (irradiance.wPerM2 / CLEAR_DAY_W_PER_M2) * 100,
         );

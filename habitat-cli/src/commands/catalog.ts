@@ -1,13 +1,20 @@
 import type { Command } from "commander";
+import type {
+  BlueprintCatalogResponse,
+  ProductionBlueprint,
+  ResourceCatalogResponse,
+} from "../kepler";
 import {
   formatBlueprintDetails,
   formatBlueprintTable,
   formatResourceTable,
-  listBlueprints,
-  listResources,
-  showBlueprint,
 } from "../catalog";
+import { apiGet } from "../api-client";
 import { reportError } from "../cli";
+
+// Catalog reads now go through the local backend, which proxies Kepler. The CLI
+// fetches the JSON and formats it with the same pure formatters as before — no
+// catalog data is hard-coded here.
 
 export function registerCatalogCommands(program: Command): void {
   const blueprintCommand = program
@@ -19,7 +26,10 @@ export function registerCatalogCommands(program: Command): void {
     .description("List available blueprints from the Kepler catalog.")
     .action(async () => {
       try {
-        console.log(formatBlueprintTable(await listBlueprints()));
+        const { blueprints } = await apiGet<BlueprintCatalogResponse>(
+          "/catalog/blueprints",
+        );
+        console.log(formatBlueprintTable(blueprints));
       } catch (error) {
         reportError(program, error);
       }
@@ -31,7 +41,10 @@ export function registerCatalogCommands(program: Command): void {
     .argument("<blueprint-id>", "blueprint identifier")
     .action(async (blueprintId: string) => {
       try {
-        console.log(formatBlueprintDetails(await showBlueprint(blueprintId)));
+        const { blueprint } = await apiGet<{ blueprint: ProductionBlueprint }>(
+          `/catalog/blueprints/${encodeURIComponent(blueprintId)}`,
+        );
+        console.log(formatBlueprintDetails(blueprint));
       } catch (error) {
         reportError(program, error);
       }
@@ -46,7 +59,10 @@ export function registerCatalogCommands(program: Command): void {
     .description("List resource types defined in the Kepler catalog.")
     .action(async () => {
       try {
-        console.log(formatResourceTable(await listResources()));
+        const { resources } = await apiGet<ResourceCatalogResponse>(
+          "/catalog/resources",
+        );
+        console.log(formatResourceTable(resources));
       } catch (error) {
         reportError(program, error);
       }

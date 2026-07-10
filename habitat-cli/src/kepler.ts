@@ -340,12 +340,18 @@ async function request(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (error) {
+    console.log(`[kepler] ${method} ${path} -> unreachable`);
     throw new Error(
       `Could not reach Kepler at ${url}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
+
+  // Sanitized outbound-call log so the server terminal shows when the backend
+  // reaches Kepler and what status came back. Deliberately logs only the method,
+  // path, and status — never the bearer token, request body, or response body.
+  console.log(`[kepler] ${method} ${path} -> ${response.status}`);
 
   if (!response.ok) {
     throw new Error(
