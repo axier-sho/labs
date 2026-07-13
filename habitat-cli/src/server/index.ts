@@ -8,11 +8,13 @@ import { createApp } from "./app";
 //   HABITAT_API_HOST=0.0.0.0 HABITAT_API_PORT=18787 bun run server
 //
 // Host semantics matter:
-//   localhost / 127.0.0.1  accept requests only from this machine (safe default)
+//   localhost / 127.0.0.1  accept requests only from this machine
 //   0.0.0.0                accept IPv4 from every interface, including Tailscale
 // You never browse to http://0.0.0.0:PORT — 0.0.0.0 is a server-side listening
 // instruction. Clients use localhost, the Tailscale IP, or the Tailscale name.
-const DEFAULT_HOST = "localhost";
+// Default to 0.0.0.0 so a plain `bun run server` is reachable over Tailscale;
+// override with HABITAT_API_HOST=localhost to restrict to this machine.
+const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_PORT = 8787;
 
 function resolvePort(): number {
