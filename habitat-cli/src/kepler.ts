@@ -108,6 +108,84 @@ export type SolarIrradianceResponse = {
   solarIrradiance: SolarIrradiance;
 };
 
+// --- World scan ----------------------------------------------------------
+// Kepler owns the hidden resource truth and the remaining quantity of every
+// tile. A scan never returns that truth: it returns a probability distribution
+// derived from the sensor strength and distance the Habitat reports. A
+// `resourceType` of null is the "none" candidate (an empty tile).
+
+export type WorldScanProbability = {
+  resourceType: string | null;
+  probabilityPct: number;
+};
+
+export type WorldScanQuantityEstimate = {
+  resourceType: string;
+  unit: string;
+  estimatedKg: number;
+  minimumKg: number;
+  maximumKg: number;
+  exact: boolean;
+};
+
+export type WorldScanTile = {
+  x: number;
+  y: number;
+  terrain: string;
+  distanceTiles: number;
+  probabilities: WorldScanProbability[];
+  topCandidate: WorldScanProbability;
+  quantityEstimate: WorldScanQuantityEstimate | null;
+};
+
+export type WorldScan = {
+  modelVersion: string;
+  origin: { x: number; y: number };
+  sensorStrength: number;
+  radiusTiles: number;
+  tiles: WorldScanTile[];
+};
+
+export type WorldScanResponse = { scan: WorldScan };
+
+export type WorldScanRequest = {
+  habitatId: string;
+  x: number;
+  y: number;
+  sensorStrength: number;
+  radiusTiles: number;
+};
+
+export async function fetchWorldScan(
+  params: WorldScanRequest,
+  baseUrl?: string,
+): Promise<WorldScanResponse> {
+  const resolvedBaseUrl =
+    baseUrl !== undefined && baseUrl.trim() !== ""
+      ? baseUrl.replace(/\/+$/, "")
+      : resolveBaseUrl();
+
+  const query = new URLSearchParams({
+    habitatId: params.habitatId,
+    x: String(params.x),
+    y: String(params.y),
+    sensorStrength: String(params.sensorStrength),
+    radiusTiles: String(params.radiusTiles),
+  });
+
+  const body = (await request(
+    resolvedBaseUrl,
+    "GET",
+    `/world/scan?${query.toString()}`,
+  )) as WorldScanResponse;
+
+  if (typeof body?.scan !== "object" || !Array.isArray(body?.scan?.tiles)) {
+    throw new Error("Kepler returned no world scan.");
+  }
+
+  return body;
+}
+
 export async function registerHabitat(name: string): Promise<{
   registration: Registration;
   response: RegisterResponse;

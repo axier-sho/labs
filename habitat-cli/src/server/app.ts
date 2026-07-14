@@ -27,6 +27,7 @@ import {
   listActiveConstructions,
   startConstruction,
 } from "../construction";
+import { ScanValidationError, requestWorldScan } from "../scan";
 
 // The Hono backend is the REST boundary the CLI talks to. It — not the CLI —
 // owns the local SQLite state and all Kepler transport. This keeps the CLI
@@ -213,6 +214,34 @@ export function createApp() {
       const message = error instanceof Error ? error.message : String(error);
       console.log("[habitat-api] GET /solar/irradiance -> 502 Kepler error");
       return c.json({ error: message }, 502);
+    }
+  });
+
+  // GET /world/scan?x&y&sensorStrength&radiusTiles -> Kepler's resource
+  // probability estimate for the tiles around a position. Read-only: the
+  // response is passed through unchanged, and no resource truth or remaining
+  // quantity is stored locally. `habitatId` is supplied from the saved
+  // registration, so callers never pass one.
+  app.get("/world/scan", async (c) => {
+    const query = c.req.query();
+
+    try {
+      const body = await requestWorldScan({
+        x: parseCoordinate(query.x),
+        y: parseCoordinate(query.y),
+        sensorStrength: parseCoordinate(query.sensorStrength),
+        radiusTiles: parseCoordinate(query.radiusTiles ?? "0"),
+      });
+
+      console.log(
+        `[habitat-api] GET /world/scan -> proxied to Kepler (${body.scan.tiles.length} tiles)`,
+      );
+      return c.json(body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = error instanceof ScanValidationError ? 400 : 502;
+      console.log(`[habitat-api] GET /world/scan -> ${status}`);
+      return c.json({ error: message }, status);
     }
   });
 
@@ -460,4 +489,11 @@ export function createApp() {
   });
 
   return app;
+}
+
+// Query strings are always text. Turn one into a number without letting the
+// empty string quietly become 0 — scan.ts rejects anything that is not an
+// integer, so NaN surfaces as a clear validation message.
+function parseCoordinate(value: string | undefined): number {
+  return value === undefined || value.trim() === "" ? NaN : Number(value);
 }

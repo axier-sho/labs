@@ -10,6 +10,7 @@ import { registerCatalogCommands } from "./commands/catalog";
 import { registerInventoryCommands } from "./commands/inventory";
 import { registerConstructionCommands } from "./commands/construction";
 import { registerSolarCommands } from "./commands/solar";
+import { registerScanCommands } from "./commands/scan";
 
 const program = new Command();
 
@@ -46,6 +47,7 @@ Commands:
   habitat module delete <module-id>          delete a local Habitat module
   habitat tick [count]                       advance the simulation by N ticks
   habitat solar status                       show current solar irradiance from Kepler
+  habitat scan --x <n> --y <n> --strength <n>  estimate nearby resources from Kepler
   habitat inventory list                     list local materials on hand
   habitat inventory add <resource> <qty>     add materials to local inventory
   habitat construct <blueprint-id>           start construction from a blueprint
@@ -85,6 +87,7 @@ Agent discovery:
   habitat module set-status --help
   habitat module delete --help
   habitat tick --help
+  habitat scan --help
   habitat inventory --help
   habitat inventory list --help
   habitat inventory add --help
@@ -112,5 +115,6 @@ registerCatalogCommands(program);
 registerInventoryCommands(program);
 registerConstructionCommands(program);
 registerSolarCommands(program);
+registerScanCommands(program);
 
 await program.parseAsync();
