@@ -3,7 +3,7 @@ Description=Habitat API
 
 [Service]
 Type=simple
-WorkingDirectory=%h/habitat-cli
+WorkingDirectory=%h/labs/habitat-cli
 ExecStart=/usr/local/bin/bun run server
 Restart=always
 RestartSec=3
