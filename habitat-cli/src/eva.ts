@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { ALERT_CODES, observeAlertSync, resolveAlertsSync } from "./alerts";
 import {
   addCarriedSync,
   carriedTotalKg,
@@ -147,6 +148,18 @@ export async function deployHuman(humanId: string): Promise<EvaStatus> {
     // A fresh EVA starts with an empty satchel. Anything left behind by an
     // earlier one would otherwise be counted against this explorer's capacity.
     clearCarriedSync();
+
+    // Someone being outside is a standing condition, not an event: it opens here
+    // and stays open until they dock.
+    observeAlertSync({
+      code: ALERT_CODES.humanDeployed,
+      title: "Human outside the habitat",
+      description: `${human.displayName} (${human.id}) is on EVA and is not inside the habitat.`,
+      severity: "info",
+      source: "eva",
+      subject: { type: "human", id: human.id },
+      details: { suitportModuleId: suitport.id, maxCarryKg },
+    });
   })();
 
   return getEvaStatus();
@@ -202,7 +215,33 @@ export async function collectMaterial(quantityKg: number): Promise<{
   // mistake. Nothing local is written until it says yes.
   const collection = await collectAtTile(registration, eva, quantityKg);
 
-  addCarriedSync(collection.resourceType, collection.collectedKg);
+  getDb().transaction(() => {
+    addCarriedSync(collection.resourceType, collection.collectedKg);
+
+    // The material is in the satchel, so whatever Kepler refused before is no
+    // longer the situation.
+    resolveAlertsSync(ALERT_CODES.collectionRefused, {
+      type: "human",
+      id: eva.deployedHumanId,
+    });
+
+    const nowCarryingKg = carriedTotalKg(readCarriedSync());
+
+    if (nowCarryingKg >= eva.maxCarryKg) {
+      observeAlertSync({
+        code: ALERT_CODES.carryCapacityReached,
+        title: "Suit carrying capacity reached",
+        description:
+          `The explorer is carrying ${formatKg(nowCarryingKg)} kg of a ` +
+          `${formatKg(eva.maxCarryKg)} kg limit and cannot collect any more. ` +
+          "Dock at (0, 0) to unload.",
+        severity: "warning",
+        source: "eva",
+        subject: { type: "human", id: eva.deployedHumanId },
+        details: { carriedKg: nowCarryingKg, maxCarryKg: eva.maxCarryKg },
+      });
+    }
+  })();
 
   return {
     status: await getEvaStatus(),
@@ -236,9 +275,31 @@ async function collectAtTile(
       error.status >= 400 &&
       error.status < 500
     ) {
+      const reason = error.keplerMessage ?? "no reason given";
+
+      // Worth an alert precisely because local validation already passed: the
+      // habitat believed this would work and the world disagreed, which is the
+      // kind of surprise an operator wants a record of.
+      observeAlertSync({
+        code: ALERT_CODES.collectionRefused,
+        title: "Collection refused by Kepler",
+        description:
+          `A locally valid request for ${quantityKg} kg at ` +
+          `(${eva.x}, ${eva.y}) was refused: ${reason}`,
+        severity: "warning",
+        source: "eva.collect",
+        subject: { type: "human", id: eva.deployedHumanId },
+        details: {
+          x: eva.x,
+          y: eva.y,
+          requestedKg: quantityKg,
+          keplerStatus: error.status,
+          reason,
+        },
+      });
+
       throw new CollectionRefusedError(
-        `Kepler refused to hand over ${quantityKg} kg at (${eva.x}, ${eva.y}): ` +
-          `${error.keplerMessage ?? "no reason given"}`,
+        `Kepler refused to hand over ${quantityKg} kg at (${eva.x}, ${eva.y}): ${reason}`,
       );
     }
 
@@ -275,6 +336,15 @@ export async function dockExplorer(): Promise<{
     clearCarriedSync();
     setHumanLocationSync(eva.deployedHumanId, eva.suitportModuleId);
     clearEvaSync();
+
+    // The EVA is over, so every condition that only existed because of it is
+    // over too. Resolving them here — inside the same commit — is what keeps the
+    // alert list honest: there is no instant where the habitat shows nobody
+    // outside and still warns that someone is.
+    const subject = { type: "human", id: eva.deployedHumanId } as const;
+    resolveAlertsSync(ALERT_CODES.humanDeployed, subject);
+    resolveAlertsSync(ALERT_CODES.carryCapacityReached, subject);
+    resolveAlertsSync(ALERT_CODES.collectionRefused, subject);
   })();
 
   return {

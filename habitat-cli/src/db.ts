@@ -232,4 +232,38 @@ function migrate(database: Database): void {
       schema         TEXT NOT NULL
     );
   `);
+
+  // Operational alerts, shaped by contracts.alerts. The CHECKs mirror the
+  // enums in that contract so a bad severity or status cannot be stored even if
+  // a caller skips validation.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS alerts (
+      id               TEXT PRIMARY KEY,
+      code             TEXT NOT NULL,
+      title            TEXT NOT NULL,
+      description      TEXT NOT NULL,
+      severity         TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+      status           TEXT NOT NULL CHECK (status IN ('open', 'acknowledged', 'resolved')),
+      source           TEXT NOT NULL,
+      subjectType      TEXT CHECK (subjectType IS NULL OR subjectType IN ('module', 'human')),
+      subjectId        TEXT,
+      details          TEXT,
+      openedAt         TEXT NOT NULL,
+      lastObservedAt   TEXT NOT NULL,
+      acknowledgedAt   TEXT,
+      resolvedAt       TEXT,
+      occurrenceCount  INTEGER NOT NULL CHECK (occurrenceCount >= 1),
+      CHECK ((subjectType IS NULL) = (subjectId IS NULL))
+    );
+  `);
+
+  // Deduplication, enforced by the database rather than by a read-then-write
+  // race: the same condition about the same subject can have only one alert that
+  // is not yet resolved. Resolved ones are exempt, so the same condition
+  // recurring later opens a new alert with its own history.
+  database.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS alerts_unresolved_identity
+      ON alerts (code, IFNULL(subjectType, ''), IFNULL(subjectId, ''))
+      WHERE status <> 'resolved';
+  `);
 }

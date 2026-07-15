@@ -13,6 +13,7 @@ import { registerSolarCommands } from "./commands/solar";
 import { registerScanCommands } from "./commands/scan";
 import { registerHumanCommands } from "./commands/human";
 import { registerEvaCommands } from "./commands/eva";
+import { registerAlertCommands } from "./commands/alert";
 
 const program = new Command();
 
@@ -57,6 +58,8 @@ Commands:
   habitat eva dock                           dock at (0, 0) and unload carried material
   habitat scan --strength <n> --radius <n>   estimate resources at the explorer's tile
   habitat collect <quantity-kg>              collect material at the current tile
+  habitat alert list                         list persisted alerts and statuses
+  habitat alert acknowledge <alert-id>       acknowledge one alert
   habitat inventory list                     list local materials on hand
   habitat inventory add <resource> <qty>     add materials to local inventory
   habitat construct <blueprint-id>           start construction from a blueprint
@@ -106,6 +109,9 @@ Agent discovery:
   habitat eva dock --help
   habitat scan --help
   habitat collect --help
+  habitat alert --help
+  habitat alert list --help
+  habitat alert acknowledge --help
   habitat inventory --help
   habitat inventory list --help
   habitat inventory add --help
@@ -136,5 +142,6 @@ registerSolarCommands(program);
 registerScanCommands(program);
 registerHumanCommands(program);
 registerEvaCommands(program);
+registerAlertCommands(program);
 
 await program.parseAsync();

@@ -18,6 +18,7 @@ import {
   updateHabitatModule,
 } from "../modules";
 import { clearHydratedState, hydrateRegistration } from "../hydration";
+import { AlertValidationError, acknowledgeAlert, listAlerts } from "../alerts";
 import {
   HumanValidationError,
   listHumans,
@@ -500,6 +501,39 @@ export function createApp() {
       const message = error instanceof Error ? error.message : String(error);
       const status = describeHumanErrorStatus(error, message);
       console.log(`[habitat-api] PATCH /humans/${id} -> ${status}`);
+      return c.json({ error: message }, status);
+    }
+  });
+
+  // --- Operational alerts (SQLite-owned by the backend) -------------------
+  // Alerts are raised by the subsystems that notice the condition, not by a
+  // route. What is exposed here is reading them and acting on them.
+
+  // GET /alerts -> every alert, unresolved first.
+  app.get("/alerts", async (c) => {
+    const alerts = await listAlerts();
+    const open = alerts.filter((alert) => alert.status === "open").length;
+    console.log(`[habitat-api] GET /alerts -> ${alerts.length} alerts, ${open} open`);
+    return c.json({ alerts });
+  });
+
+  // POST /alerts/:id/acknowledge -> an operator has seen it.
+  app.post("/alerts/:id/acknowledge", async (c) => {
+    const id = c.req.param("id");
+
+    try {
+      const alert = await acknowledgeAlert(id);
+      console.log(`[habitat-api] POST /alerts/${id}/acknowledge -> ${alert.status}`);
+      return c.json({ alert });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status =
+        error instanceof AlertValidationError
+          ? message.includes("was not found")
+            ? 404
+            : 400
+          : 500;
+      console.log(`[habitat-api] POST /alerts/${id}/acknowledge -> ${status}`);
       return c.json({ error: message }, status);
     }
   });
