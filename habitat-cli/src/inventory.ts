@@ -151,6 +151,10 @@ export function writeInventorySync(resources: Record<string, number>): void {
   }
 }
 
+export function clearInventorySync(): void {
+  getDb().run("DELETE FROM inventory");
+}
+
 // Fold `additions` (resource -> kg) into the inventory. Used by docking, which
 // already holds a transaction, so this must stay synchronous and unwrapped.
 export function addInventorySync(additions: Record<string, number>): void {

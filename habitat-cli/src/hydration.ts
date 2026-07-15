@@ -17,6 +17,7 @@ import {
 } from "./modules";
 import { clearHumansSync, hydrateStarterHumans, writeHumansSync } from "./humans";
 import { clearCarriedSync, clearEvaSync } from "./eva-state";
+import { clearInventorySync } from "./inventory";
 
 // Turning a registration response into local state. A habitat is registered, has
 // its starter modules, and has its starter crew, or it is none of those things —
@@ -67,17 +68,18 @@ export async function hydrateRegistration(input: {
   };
 }
 
-// The mirror image of hydration: unregistering leaves no crew, no modules, no
-// explorer, and no alerts behind. Alerts go too — they are all about humans and
-// modules that are about to stop existing, so keeping them would leave a list of
-// complaints pointing at nothing. The exploration state goes for the same
-// reason: an EVA belongs to a habitat, and there is about to be no habitat.
+// The mirror image of hydration. Unregistering destroys the habitat, so
+// everything that only made sense as part of it goes: the crew, the modules, the
+// explorer and their satchel, the alerts complaining about them, and the
+// materials the habitat was holding. Leaving any of it would let the next
+// registration inherit possessions from a habitat that no longer exists.
 export function clearHydratedState(): void {
   getDb().transaction(() => {
     clearEvaSync();
     clearCarriedSync();
     clearHumansSync();
     clearHabitatModuleStateSync();
+    clearInventorySync();
     clearAlertsSync();
     clearAlertContractSync();
   })();
