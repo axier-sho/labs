@@ -1,5 +1,8 @@
 .DS_Store
 
+# Has its own public repository: github.com/axier-sho/lxc-night-watch
+/lxc-night-watch/
+
 # Exclude files above 10MB
 /terminal-navigation-walkthrough/Best pipeline.mov
 /terminal-navigation-walkthrough/terminal-practice/ﾛｸｶﾞ 2026-06-30 20.51.01.mov
