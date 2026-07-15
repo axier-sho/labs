@@ -195,6 +195,33 @@ function migrate(database: Database): void {
     );
   `);
 
+  // The one human currently outside, if any. Absence of the row *is* the "nobody
+  // is deployed" state, which is why every column but the pinned id is set
+  // together on deploy and the row is deleted on dock. maxCarryKg is snapshotted
+  // at deploy time so an EVA's limit cannot shift underneath it.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS eva (
+      id                INTEGER PRIMARY KEY CHECK (id = 1),
+      deployedHumanId   TEXT NOT NULL,
+      suitportModuleId  TEXT NOT NULL,
+      x                 INTEGER NOT NULL,
+      y                 INTEGER NOT NULL,
+      maxCarryKg        REAL NOT NULL CHECK (maxCarryKg > 0),
+      deployedAt        TEXT NOT NULL,
+      updatedAt         TEXT NOT NULL
+    );
+  `);
+
+  // What the explorer is carrying right now, in kilograms. Separate from
+  // `inventory`: material in the satchel has not reached the habitat yet, and
+  // docking is what moves it across.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS eva_carried (
+      resource    TEXT PRIMARY KEY,
+      quantityKg  REAL NOT NULL CHECK (quantityKg > 0)
+    );
+  `);
+
   // contracts.alerts from the registration response, kept verbatim so alert
   // records are validated against the definition Kepler actually handed us
   // rather than one hard-coded here.

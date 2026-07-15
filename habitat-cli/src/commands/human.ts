@@ -12,9 +12,15 @@ export function registerHumanCommands(program: Command): void {
   humanCommand
     .command("list")
     .description("List the habitat's humans and the module each one is in.")
-    .action(async () => {
+    .option("--json", "print the complete JSON response")
+    .action(async (options: { json?: boolean }) => {
       try {
         const { humans } = await apiGet<{ humans: Human[] }>("/humans");
+
+        if (options.json === true) {
+          console.log(JSON.stringify(humans, null, 2));
+          return;
+        }
 
         if (humans.length === 0) {
           console.log(

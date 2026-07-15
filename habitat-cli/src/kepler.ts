@@ -180,6 +180,108 @@ export type WorldScanRequest = {
   radiusTiles: number;
 };
 
+// --- World sectors -------------------------------------------------------
+// The sector is Kepler's, not ours: it decides how far a habitat may roam. The
+// bounds are read live rather than assumed, so a resized or re-centred sector
+// needs no change here.
+
+export type SectorBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
+export type WorldSector = {
+  id: string;
+  displayName: string;
+  origin: { x: number; y: number };
+  bounds: SectorBounds;
+  tileSizeMeters: number;
+  supportedTerrains: string[];
+};
+
+export async function fetchCurrentSector(
+  habitatId: string,
+  baseUrl?: string,
+): Promise<WorldSector> {
+  const resolvedBaseUrl =
+    baseUrl !== undefined && baseUrl.trim() !== ""
+      ? baseUrl.replace(/\/+$/, "")
+      : resolveBaseUrl();
+
+  const query = new URLSearchParams({ habitatId });
+
+  const body = (await request(
+    resolvedBaseUrl,
+    "GET",
+    `/world/sectors/current?${query.toString()}`,
+  )) as { sector?: WorldSector };
+
+  const sector = body?.sector;
+
+  if (
+    typeof sector !== "object" ||
+    sector === null ||
+    typeof sector.bounds?.minX !== "number"
+  ) {
+    throw new Error("Kepler returned no current sector.");
+  }
+
+  return sector;
+}
+
+// --- World collect -------------------------------------------------------
+// Kepler owns which material is on a tile and how much of it is left. The
+// habitat never learns that truth except by successfully taking some, and the
+// deduction is atomic on Kepler's side.
+
+export type WorldCollection = {
+  x: number;
+  y: number;
+  resourceType: string;
+  unit: string;
+  collectedKg: number;
+  remainingKg: number;
+};
+
+export type WorldCollectRequest = {
+  habitatId: string;
+  x: number;
+  y: number;
+  quantityKg: number;
+};
+
+export async function collectFromWorld(
+  params: WorldCollectRequest,
+  baseUrl?: string,
+): Promise<WorldCollection> {
+  const resolvedBaseUrl =
+    baseUrl !== undefined && baseUrl.trim() !== ""
+      ? baseUrl.replace(/\/+$/, "")
+      : resolveBaseUrl();
+
+  const body = (await request(resolvedBaseUrl, "POST", "/world/collect", {
+    habitatId: params.habitatId,
+    x: params.x,
+    y: params.y,
+    quantityKg: params.quantityKg,
+  })) as { collection?: WorldCollection };
+
+  const collection = body?.collection;
+
+  if (
+    typeof collection !== "object" ||
+    collection === null ||
+    typeof collection.collectedKg !== "number" ||
+    typeof collection.resourceType !== "string"
+  ) {
+    throw new Error("Kepler returned no collection result.");
+  }
+
+  return collection;
+}
+
 export async function fetchWorldScan(
   params: WorldScanRequest,
   baseUrl?: string,
@@ -477,8 +579,13 @@ async function request(
   console.log(`[kepler] ${method} ${path} -> ${response.status}`);
 
   if (!response.ok) {
-    throw new Error(
-      `Kepler ${method} ${path} failed (${response.status} ${response.statusText}).${await describeErrorBody(response)}`,
+    const detail = await readKeplerError(response);
+
+    throw new KeplerHttpError(
+      `Kepler ${method} ${path} failed (${response.status} ${response.statusText}).` +
+        (detail === null ? "" : `\n${detail}`),
+      response.status,
+      detail,
     );
   }
 
@@ -496,13 +603,58 @@ async function request(
   return JSON.parse(text);
 }
 
-async function describeErrorBody(response: Response): Promise<string> {
+// A non-2xx from Kepler is not always a fault. A 4xx on /world/collect is
+// Kepler answering a perfectly well-formed question about the world ("there is
+// nothing there"), so callers need the status and the message separately in
+// order to tell an answer apart from an outage.
+export class KeplerHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    // Kepler's own human-readable explanation, when it sent one.
+    readonly keplerMessage: string | null,
+  ) {
+    super(message);
+    this.name = "KeplerHttpError";
+  }
+}
+
+// Kepler reports errors as { "error": { "code", "message" } }. Dig out the
+// message and fall back to the raw text, so a changed error shape degrades to
+// something readable rather than to nothing.
+async function readKeplerError(response: Response): Promise<string | null> {
   try {
     const text = await response.text();
 
-    return text.trim() === "" ? "" : `\n${text.trim()}`;
+    if (text.trim() === "") {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(text) as {
+        error?: { message?: unknown } | string;
+      };
+      const error = parsed.error;
+
+      if (typeof error === "string" && error.trim() !== "") {
+        return error.trim();
+      }
+
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        typeof error.message === "string" &&
+        error.message.trim() !== ""
+      ) {
+        return error.message.trim();
+      }
+    } catch {
+      // Not JSON; the raw text is the best we have.
+    }
+
+    return text.trim();
   } catch {
-    return "";
+    return null;
   }
 }
 

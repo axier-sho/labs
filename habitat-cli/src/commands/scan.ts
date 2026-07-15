@@ -8,10 +8,11 @@ import { apiGet } from "../api-client";
 import { formatNumber, renderTable } from "../format";
 import { reportError } from "../cli";
 
-// `habitat scan` reports where the operator is and how strong the sensor is;
-// Kepler answers with what is probably there. The command never talks to Kepler
-// directly and never passes a habitatId — the local Habitat API supplies that
-// from the saved registration.
+// `habitat scan` reports how strong the sensor is; Kepler answers with what is
+// probably there. The command never talks to Kepler directly, and it passes
+// neither a habitatId nor a position — the local Habitat API supplies both from
+// saved state. There is deliberately no --x/--y: a sensor is carried by a human,
+// so the only tile you can scan from is the one your explorer is standing on.
 
 const MAX_SENSOR_STRENGTH = 100;
 const MAX_RADIUS_TILES = 5;
@@ -22,9 +23,9 @@ const NONE_CANDIDATE = "none";
 export function registerScanCommands(program: Command): void {
   program
     .command("scan")
-    .description("Scan for nearby resources with Kepler's sensor model.")
-    .requiredOption("--x <integer>", "current x coordinate", parseCoordinate)
-    .requiredOption("--y <integer>", "current y coordinate", parseCoordinate)
+    .description(
+      "Scan for nearby resources from the deployed explorer's position.",
+    )
     .requiredOption(
       "--strength <0-100>",
       "effective sensor strength",
@@ -38,17 +39,9 @@ export function registerScanCommands(program: Command): void {
     )
     .option("--json", "print the complete JSON response")
     .action(
-      async (options: {
-        x: number;
-        y: number;
-        strength: number;
-        radius: number;
-        json?: boolean;
-      }) => {
+      async (options: { strength: number; radius: number; json?: boolean }) => {
         try {
           const query = new URLSearchParams({
-            x: String(options.x),
-            y: String(options.y),
             sensorStrength: String(options.strength),
             radiusTiles: String(options.radius),
           });
@@ -180,16 +173,6 @@ function formatPercent(value: number): string {
   return `${formatNumber(value)}%`;
 }
 
-function parseCoordinate(value: string): number {
-  const parsed = toNumber(value);
-
-  if (!Number.isInteger(parsed)) {
-    throw new InvalidArgumentError("Coordinates must be integers.");
-  }
-
-  return parsed;
-}
-
 function parseBounded(
   value: string,
   name: string,
@@ -207,7 +190,8 @@ function parseBounded(
   return parsed;
 }
 
-// Number("") is 0, which would silently turn `--x ""` into a valid coordinate.
+// Number("") is 0, which would silently turn `--strength ""` into a valid
+// reading.
 function toNumber(value: string): number {
   return value.trim() === "" ? NaN : Number(value);
 }

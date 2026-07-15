@@ -1,3 +1,4 @@
+import { requireExplorerPosition } from "./eva";
 import {
   fetchWorldScan,
   readRegistration,
@@ -9,10 +10,19 @@ import {
 // owns the hidden resource truth and the remaining quantity. Nothing here is
 // persisted: a scan is an estimate, not a fact, so there is no local state to
 // keep in sync.
+//
+// The position is read from the saved exploration state, never from the caller.
+// A sensor is carried by a human, so a scan is only meaningful from where that
+// human is actually standing — there is no way to ask about a tile nobody is on.
 
 export type ScanOptions = {
   x: number;
   y: number;
+  sensorStrength: number;
+  radiusTiles: number;
+};
+
+export type ScanRequest = {
   sensorStrength: number;
   radiusTiles: number;
 };
@@ -24,7 +34,23 @@ export class ScanValidationError extends Error {}
 const MAX_SENSOR_STRENGTH = 100;
 const MAX_RADIUS_TILES = 5;
 
+// Scan from wherever the explorer is. Throws through EvaValidationError when
+// nobody is deployed, which the backend reports as a 400 rather than sending
+// Kepler a scan from an imaginary operator.
 export async function requestWorldScan(
+  request: ScanRequest,
+): Promise<WorldScanResponse> {
+  const position = requireExplorerPosition();
+
+  return requestWorldScanAt({
+    x: position.x,
+    y: position.y,
+    sensorStrength: request.sensorStrength,
+    radiusTiles: request.radiusTiles,
+  });
+}
+
+async function requestWorldScanAt(
   options: ScanOptions,
 ): Promise<WorldScanResponse> {
   const { x, y, sensorStrength, radiusTiles } = validateScanOptions(options);

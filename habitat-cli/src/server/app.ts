@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
   fetchBlueprintCatalog,
   fetchHabitatStatus,
@@ -33,6 +33,14 @@ import {
   startConstruction,
 } from "../construction";
 import { ScanValidationError, requestWorldScan } from "../scan";
+import {
+  EvaValidationError,
+  collectMaterial,
+  deployHuman,
+  dockExplorer,
+  getEvaStatus,
+  moveExplorer,
+} from "../eva";
 
 // The Hono backend is the REST boundary the CLI talks to. It — not the CLI —
 // owns the local SQLite state and all Kepler transport. This keeps the CLI
@@ -211,18 +219,17 @@ export function createApp() {
     }
   });
 
-  // GET /world/scan?x&y&sensorStrength&radiusTiles -> Kepler's resource
-  // probability estimate for the tiles around a position. Read-only: the
-  // response is passed through unchanged, and no resource truth or remaining
-  // quantity is stored locally. `habitatId` is supplied from the saved
-  // registration, so callers never pass one.
+  // GET /world/scan?sensorStrength&radiusTiles -> Kepler's resource probability
+  // estimate for the tiles around the deployed explorer. Read-only: the response
+  // is passed through unchanged, and no resource truth or remaining quantity is
+  // stored locally. Both `habitatId` and the scan origin come from saved local
+  // state, so callers pass neither — there is no way to scan from a tile the
+  // habitat's explorer is not standing on.
   app.get("/world/scan", async (c) => {
     const query = c.req.query();
 
     try {
       const body = await requestWorldScan({
-        x: parseCoordinate(query.x),
-        y: parseCoordinate(query.y),
         sensorStrength: parseCoordinate(query.sensorStrength),
         radiusTiles: parseCoordinate(query.radiusTiles ?? "0"),
       });
@@ -233,9 +240,116 @@ export function createApp() {
       return c.json(body);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status = error instanceof ScanValidationError ? 400 : 502;
+      const status =
+        error instanceof ScanValidationError || error instanceof EvaValidationError
+          ? 400
+          : 502;
       console.log(`[habitat-api] GET /world/scan -> ${status}`);
       return c.json({ error: message }, status);
+    }
+  });
+
+  // --- Exploration (SQLite-owned by the backend) --------------------------
+  // The explorer's position is local state. Kepler is told where we are; it is
+  // never asked, and it never decides.
+
+  // GET /eva -> who is outside, where, and what they are carrying.
+  app.get("/eva", async (c) => {
+    const status = await getEvaStatus();
+    console.log(
+      `[habitat-api] GET /eva -> ${
+        status.deployed
+          ? `${status.human?.id} at (${status.position?.x}, ${status.position?.y})`
+          : "nobody deployed"
+      }`,
+    );
+    return c.json({ eva: status });
+  });
+
+  // POST /eva/deploy { humanId } -> send one human out through the suitport.
+  app.post("/eva/deploy", async (c) => {
+    let body: { humanId?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /eva/deploy -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (typeof body.humanId !== "string" || body.humanId === "") {
+      console.log("[habitat-api] POST /eva/deploy -> 400 missing humanId");
+      return c.json({ error: "A 'humanId' string is required." }, 400);
+    }
+
+    try {
+      const status = await deployHuman(body.humanId);
+      console.log(`[habitat-api] POST /eva/deploy -> deployed ${body.humanId}`);
+      return c.json({ eva: status }, 201);
+    } catch (error) {
+      return respondEvaError(c, error, "POST /eva/deploy");
+    }
+  });
+
+  // POST /eva/move { x, y } -> step one tile.
+  app.post("/eva/move", async (c) => {
+    let body: { x?: unknown; y?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /eva/move -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (typeof body.x !== "number" || typeof body.y !== "number") {
+      console.log("[habitat-api] POST /eva/move -> 400 missing coordinates");
+      return c.json({ error: "Numeric 'x' and 'y' are required." }, 400);
+    }
+
+    try {
+      const status = await moveExplorer(body.x, body.y);
+      console.log(`[habitat-api] POST /eva/move -> (${body.x}, ${body.y})`);
+      return c.json({ eva: status });
+    } catch (error) {
+      return respondEvaError(c, error, "POST /eva/move");
+    }
+  });
+
+  // POST /eva/dock -> come home at (0, 0) and unload into local inventory.
+  app.post("/eva/dock", async (c) => {
+    try {
+      const result = await dockExplorer();
+      console.log(
+        `[habitat-api] POST /eva/dock -> docked ${result.humanId}, unloaded ${result.unloaded.length} materials`,
+      );
+      return c.json(result);
+    } catch (error) {
+      return respondEvaError(c, error, "POST /eva/dock");
+    }
+  });
+
+  // POST /eva/collect { quantityKg } -> take material from the current tile.
+  app.post("/eva/collect", async (c) => {
+    let body: { quantityKg?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log("[habitat-api] POST /eva/collect -> 400 invalid JSON");
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (typeof body.quantityKg !== "number") {
+      console.log("[habitat-api] POST /eva/collect -> 400 missing quantityKg");
+      return c.json({ error: "A numeric 'quantityKg' is required." }, 400);
+    }
+
+    try {
+      const result = await collectMaterial(body.quantityKg);
+      console.log(
+        `[habitat-api] POST /eva/collect -> ${result.collectedKg} kg ${result.resourceType}`,
+      );
+      return c.json(result);
+    } catch (error) {
+      return respondEvaError(c, error, "POST /eva/collect");
     }
   });
 
@@ -530,6 +644,16 @@ export function createApp() {
   });
 
   return app;
+}
+
+// A refused EVA action is the caller's fault (400); anything else means the
+// habitat could not reach Kepler to check the world, which is a 502.
+function respondEvaError(c: Context, error: unknown, route: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = error instanceof EvaValidationError ? 400 : 502;
+
+  console.log(`[habitat-api] ${route} -> ${status}`);
+  return c.json({ error: message }, status);
 }
 
 // A rejected crew action is a 404 when the thing named does not exist and a 400

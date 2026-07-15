@@ -12,6 +12,7 @@ import { registerConstructionCommands } from "./commands/construction";
 import { registerSolarCommands } from "./commands/solar";
 import { registerScanCommands } from "./commands/scan";
 import { registerHumanCommands } from "./commands/human";
+import { registerEvaCommands } from "./commands/eva";
 
 const program = new Command();
 
@@ -50,7 +51,12 @@ Commands:
   habitat human move <human-id> <module-id>  move a human to another module
   habitat tick [count]                       advance the simulation by N ticks
   habitat solar status                       show current solar irradiance from Kepler
-  habitat scan --x <n> --y <n> --strength <n>  estimate nearby resources from Kepler
+  habitat eva status                         show explorer, position, carried load
+  habitat eva deploy <human-id>              send one human out through the suitport
+  habitat eva move <x> <y>                   move the explorer one adjacent tile
+  habitat eva dock                           dock at (0, 0) and unload carried material
+  habitat scan --strength <n> --radius <n>   estimate resources at the explorer's tile
+  habitat collect <quantity-kg>              collect material at the current tile
   habitat inventory list                     list local materials on hand
   habitat inventory add <resource> <qty>     add materials to local inventory
   habitat construct <blueprint-id>           start construction from a blueprint
@@ -93,7 +99,13 @@ Agent discovery:
   habitat human list --help
   habitat human move --help
   habitat tick --help
+  habitat eva --help
+  habitat eva status --help
+  habitat eva deploy --help
+  habitat eva move --help
+  habitat eva dock --help
   habitat scan --help
+  habitat collect --help
   habitat inventory --help
   habitat inventory list --help
   habitat inventory add --help
@@ -123,5 +135,6 @@ registerConstructionCommands(program);
 registerSolarCommands(program);
 registerScanCommands(program);
 registerHumanCommands(program);
+registerEvaCommands(program);
 
 await program.parseAsync();

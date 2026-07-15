@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { readEvaSync } from "./eva-state";
 import { readModulesSync, type HabitatModule } from "./modules";
 import type { StarterHuman } from "./kepler";
 
@@ -106,6 +107,16 @@ export async function moveHuman(
 
   if (human === null) {
     throw new HumanValidationError(`Human '${humanId}' was not found.`);
+  }
+
+  // Someone outside on EVA is not walking between modules. Their listed location
+  // is the suitport they left through, held so they have a slot to come back to,
+  // and it stays that way until they dock.
+  if (readEvaSync()?.deployedHumanId === humanId) {
+    throw new HumanValidationError(
+      `${human.displayName} (${human.id}) is outside on EVA and cannot be moved ` +
+        "between modules. Dock them first: 'habitat eva dock'.",
+    );
   }
 
   const modules = readModulesSync();
