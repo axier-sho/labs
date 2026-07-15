@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { getDb } from "./db";
 import {
   fetchBlueprintCatalog,
   type ProductionBlueprint,
@@ -35,12 +36,10 @@ type ModulePatch = {
   condition?: number;
 };
 
-const MODULE_STATE_FILE = "modules.json";
+// Modules live in SQLite (see src/db.ts). Blueprints stay on disk: they are a
+// cache of Kepler-owned catalog data, not habitat state, so they are
+// deliberately kept out of the habitat's transactional database.
 const BLUEPRINT_STATE_FILE = "blueprints.json";
-
-function moduleStatePath(): string {
-  return join(process.cwd(), ".habitat", MODULE_STATE_FILE);
-}
 
 function blueprintStatePath(): string {
   return join(process.cwd(), ".habitat", BLUEPRINT_STATE_FILE);
@@ -51,7 +50,7 @@ export async function hydrateModulesFromRegistration(input: {
   blueprints: ProductionBlueprint[];
 }): Promise<void> {
   await writeModuleState({
-    modules: hydrateStarterModules(input.starterModules),
+    modules: hydrateStarterModules(input.starterModules).modules,
   });
   await seedBlueprintState(input.blueprints);
 }
@@ -209,7 +208,11 @@ export async function deleteHabitatModule(id: string): Promise<HabitatModule> {
 }
 
 export async function clearHabitatModuleState(): Promise<void> {
-  await rm(moduleStatePath(), { force: true });
+  clearHabitatModuleStateSync();
+}
+
+export function clearHabitatModuleStateSync(): void {
+  getDb().run("DELETE FROM modules");
 }
 
 export async function clearBlueprintCatalog(): Promise<void> {
@@ -271,29 +274,67 @@ function validateBuildableBlueprint(blueprint: ProductionBlueprint): void {
 }
 
 async function readModuleState(): Promise<ModuleState> {
-  const file = Bun.file(moduleStatePath());
+  return { modules: readModulesSync() };
+}
 
-  if (!(await file.exists())) {
-    return { modules: [] };
-  }
+export function readModulesSync(): HabitatModule[] {
+  const rows = getDb()
+    .query(
+      "SELECT id, blueprintId, displayName, connectedTo, runtimeAttributes, " +
+        "capabilities FROM modules ORDER BY seq",
+    )
+    .all() as ModuleRow[];
 
-  const contents = await file.text();
-
-  if (contents.trim() === "") {
-    return { modules: [] };
-  }
-
-  const parsed = JSON.parse(contents) as Record<string, unknown>;
-  const modules = Array.isArray(parsed.modules) ? parsed.modules : [];
-
-  return {
-    modules: modules.map(readModule),
-  };
+  return rows.map(rowToModule);
 }
 
 async function writeModuleState(state: ModuleState): Promise<void> {
-  await mkdir(dirname(moduleStatePath()), { recursive: true });
-  await Bun.write(moduleStatePath(), `${JSON.stringify(state, null, 2)}\n`);
+  getDb().transaction(() => writeModulesSync(state.modules))();
+}
+
+// Replace the whole module table with `modules`, in order. Deliberately not
+// wrapped in a transaction of its own: callers that need to write modules
+// alongside other tables (registration hydration) wrap a wider one.
+export function writeModulesSync(modules: HabitatModule[]): void {
+  const database = getDb();
+  database.run("DELETE FROM modules");
+
+  const insert = database.query(
+    "INSERT INTO modules " +
+      "(id, blueprintId, displayName, connectedTo, runtimeAttributes, capabilities) " +
+      "VALUES (?, ?, ?, ?, ?, ?)",
+  );
+
+  for (const module of modules) {
+    insert.run(
+      module.id,
+      module.blueprintId,
+      module.displayName,
+      JSON.stringify(module.connectedTo),
+      JSON.stringify(module.runtimeAttributes),
+      JSON.stringify(module.capabilities),
+    );
+  }
+}
+
+type ModuleRow = {
+  id: string;
+  blueprintId: string;
+  displayName: string;
+  connectedTo: string;
+  runtimeAttributes: string;
+  capabilities: string;
+};
+
+function rowToModule(row: ModuleRow): HabitatModule {
+  return readModule({
+    id: row.id,
+    blueprintId: row.blueprintId,
+    displayName: row.displayName,
+    connectedTo: JSON.parse(row.connectedTo),
+    runtimeAttributes: JSON.parse(row.runtimeAttributes),
+    capabilities: JSON.parse(row.capabilities),
+  });
 }
 
 async function readBlueprintState(): Promise<BlueprintState> {
@@ -378,11 +419,17 @@ function cloneModules(modules: HabitatModule[]): HabitatModule[] {
   return modules.map(cloneModule);
 }
 
-function hydrateStarterModules(
-  modules: StarterModuleInstance[],
-): HabitatModule[] {
+// Starter modules arrive with Kepler's own ids and are stored under readable,
+// habitat-local ids instead (`command-module-1`). That rename is why the map is
+// returned as well as the modules: every other part of the registration
+// response that points at a starter module — connectedTo, and each starter
+// human's locationModuleId — has to be translated through it.
+export function hydrateStarterModules(modules: StarterModuleInstance[]): {
+  modules: HabitatModule[];
+  localIdByStarterId: Map<string, string>;
+} {
   const hydrated: HabitatModule[] = [];
-  const originalToLocalId = new Map<string, string>();
+  const localIdByStarterId = new Map<string, string>();
 
   for (const starterModule of modules) {
     const localId = createSequentialModuleId(
@@ -390,20 +437,20 @@ function hydrateStarterModules(
       starterModule.blueprintId,
     );
 
-    originalToLocalId.set(starterModule.id, localId);
+    localIdByStarterId.set(starterModule.id, localId);
     hydrated.push({
       id: localId,
       blueprintId: starterModule.blueprintId,
       displayName: starterModule.displayName,
       connectedTo: starterModule.connectedTo.map(
-        (connectedId) => originalToLocalId.get(connectedId) ?? connectedId,
+        (connectedId) => localIdByStarterId.get(connectedId) ?? connectedId,
       ),
       runtimeAttributes: cloneJsonRecord(starterModule.runtimeAttributes),
       capabilities: [...starterModule.capabilities],
     });
   }
 
-  return hydrated;
+  return { modules: hydrated, localIdByStarterId };
 }
 
 function cloneModule(module: HabitatModule): HabitatModule {

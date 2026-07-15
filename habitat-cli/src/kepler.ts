@@ -31,10 +31,34 @@ export type HabitatRecord = {
   lastSeenAt: string | null;
 };
 
-type RegisterResponse = {
+// The registration response is the source of truth for the habitat's starting
+// crew and infrastructure. Nothing in it is duplicated as a hard-coded literal.
+export type RegisterResponse = {
   habitatId: string;
   starterModules: StarterModuleInstance[];
+  starterHumans: StarterHuman[];
   blueprints: ProductionBlueprint[];
+  contracts: HabitatContracts;
+};
+
+// One of the habitat's starting crew. `locationModuleId` refers to a *starter
+// module* id as Kepler numbered it, which is not the habitat-local module id —
+// see hydrateStarterModules in src/modules.ts for the translation.
+export type StarterHuman = {
+  id: string;
+  displayName: string;
+  locationModuleId: string;
+};
+
+// contracts.alerts is the shared definition of an alert record. Kepler does not
+// store or manage alerts; it just tells every habitat what one has to look like.
+export type AlertContract = {
+  schemaVersion: string;
+  schema: Record<string, unknown>;
+};
+
+export type HabitatContracts = {
+  alerts: AlertContract;
 };
 
 export type StarterModuleTemplate = {
@@ -214,9 +238,7 @@ export async function registerHabitat(name: string): Promise<{
     displayName,
   })) as RegisterResponse;
 
-  if (typeof response?.habitatId !== "string" || response.habitatId === "") {
-    throw new Error("Kepler did not return a habitatId.");
-  }
+  validateRegisterResponse(response);
 
   const registration: Registration = {
     habitatId: response.habitatId,
@@ -226,9 +248,30 @@ export async function registerHabitat(name: string): Promise<{
     registeredAt: new Date().toISOString(),
   };
 
-  await writeRegistration(registration);
-
+  // Deliberately not persisted here. The caller commits the registration row
+  // together with the starter modules and humans in one transaction, so a
+  // habitat is never left registered but crewless.
   return { registration, response };
+}
+
+// Fail before touching local state if the response is missing anything the
+// habitat is required to hydrate from it.
+function validateRegisterResponse(response: RegisterResponse): void {
+  if (typeof response?.habitatId !== "string" || response.habitatId === "") {
+    throw new Error("Kepler did not return a habitatId.");
+  }
+
+  if (!Array.isArray(response.starterModules)) {
+    throw new Error("Kepler returned no starterModules.");
+  }
+
+  if (!Array.isArray(response.starterHumans)) {
+    throw new Error("Kepler returned no starterHumans.");
+  }
+
+  if (typeof response.contracts?.alerts?.schemaVersion !== "string") {
+    throw new Error("Kepler returned no contracts.alerts definition.");
+  }
 }
 
 export async function fetchBlueprintCatalog(
@@ -370,7 +413,9 @@ async function requireRegistration(): Promise<Registration> {
   return registration;
 }
 
-async function writeRegistration(registration: Registration): Promise<void> {
+// Synchronous, and carries no transaction of its own, so registration hydration
+// can commit this row alongside the starter modules and humans.
+export function writeRegistrationSync(registration: Registration): void {
   getDb().run(
     "INSERT INTO registration " +
       "(id, habitatId, habitatUuid, displayName, baseUrl, registeredAt) " +

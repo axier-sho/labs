@@ -11,14 +11,19 @@ import {
 import { showBlueprint } from "../catalog";
 import {
   clearBlueprintCatalog,
-  clearHabitatModuleState,
   createHabitatModule,
   deleteHabitatModule,
   getHabitatModule,
-  hydrateModulesFromRegistration,
   listHabitatModules,
   updateHabitatModule,
 } from "../modules";
+import { clearHydratedState, hydrateRegistration } from "../hydration";
+import {
+  HumanValidationError,
+  listHumans,
+  moveHuman,
+  requireModuleUnoccupied,
+} from "../humans";
 import { addInventory, listInventory } from "../inventory";
 import { runPowerTicks } from "../tick";
 import {
@@ -67,24 +72,13 @@ export function createApp() {
 
     try {
       const { registration, response } = await registerHabitat(name);
-      await hydrateModulesFromRegistration({
-        starterModules: response.starterModules,
-        blueprints: response.blueprints,
-      });
+      const summary = await hydrateRegistration({ registration, response });
 
       console.log(
-        `[habitat-api] POST /registration -> registered ${registration.habitatId}`,
+        `[habitat-api] POST /registration -> registered ${registration.habitatId} ` +
+          `(${summary.modulesHydrated} modules, ${summary.humansHydrated} humans)`,
       );
-      return c.json(
-        {
-          registration,
-          summary: {
-            starterModulesHydrated: response.starterModules.length,
-            blueprintsCached: response.blueprints.length,
-          },
-        },
-        201,
-      );
+      return c.json({ registration, summary }, 201);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.log("[habitat-api] POST /registration -> 400 register failed");
@@ -96,7 +90,7 @@ export function createApp() {
   app.delete("/registration", async (c) => {
     try {
       const registration = await unregisterHabitat();
-      await clearHabitatModuleState();
+      clearHydratedState();
       await clearBlueprintCatalog();
 
       console.log(
@@ -334,10 +328,12 @@ export function createApp() {
     }
   });
 
-  // DELETE /modules/:id -> remove one module, or 404.
+  // DELETE /modules/:id -> remove one module, or 404. Refused while a human is
+  // standing in it.
   app.delete("/modules/:id", async (c) => {
     const id = c.req.param("id");
     try {
+      requireModuleUnoccupied(id);
       const module = await deleteHabitatModule(id);
       console.log(`[habitat-api] DELETE /modules/${id} -> deleted`);
       return c.json({ module });
@@ -345,6 +341,51 @@ export function createApp() {
       const message = error instanceof Error ? error.message : String(error);
       const status = message.includes("was not found") ? 404 : 400;
       console.log(`[habitat-api] DELETE /modules/${id} -> ${status}`);
+      return c.json({ error: message }, status);
+    }
+  });
+
+  // --- Local crew state (SQLite-owned by the backend) ---------------------
+  // Humans are seeded once, by registration, from starterHumans. There is no
+  // route that creates one: the registration payload is the only source.
+
+  // GET /humans -> the habitat's crew and the module each one is in.
+  app.get("/humans", async (c) => {
+    const humans = await listHumans();
+    console.log(`[habitat-api] GET /humans -> ${humans.length} humans`);
+    return c.json({ humans });
+  });
+
+  // PATCH /humans/:id { locationModuleId } -> move a human between modules.
+  app.patch("/humans/:id", async (c) => {
+    const id = c.req.param("id");
+
+    let body: { locationModuleId?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      console.log(`[habitat-api] PATCH /humans/${id} -> 400 invalid JSON`);
+      return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    if (
+      typeof body.locationModuleId !== "string" ||
+      body.locationModuleId === ""
+    ) {
+      console.log(`[habitat-api] PATCH /humans/${id} -> 400 missing module`);
+      return c.json({ error: "A 'locationModuleId' string is required." }, 400);
+    }
+
+    try {
+      const human = await moveHuman(id, body.locationModuleId);
+      console.log(
+        `[habitat-api] PATCH /humans/${id} -> moved to ${human.locationModuleId}`,
+      );
+      return c.json({ human });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = describeHumanErrorStatus(error, message);
+      console.log(`[habitat-api] PATCH /humans/${id} -> ${status}`);
       return c.json({ error: message }, status);
     }
   });
@@ -489,6 +530,17 @@ export function createApp() {
   });
 
   return app;
+}
+
+// A rejected crew action is a 404 when the thing named does not exist and a 400
+// when it exists but the rule says no. Anything that is not a validation error
+// is a genuine fault, so it surfaces as a 500.
+function describeHumanErrorStatus(error: unknown, message: string): 400 | 404 | 500 {
+  if (!(error instanceof HumanValidationError)) {
+    return 500;
+  }
+
+  return message.includes("was not found") ? 404 : 400;
 }
 
 // Query strings are always text. Turn one into a number without letting the

@@ -1,13 +1,12 @@
-import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { getDb } from "./db";
 
 // Local material inventory for the Habitat CLI. This is deliberately separate
 // from the read-only Kepler resource catalog: the catalog describes what a
-// resource *is*, while this file tracks how much of each resource the local
+// resource *is*, while this table tracks how much of each resource the local
 // habitat actually holds and can spend on construction.
 //
-// State shape on disk (.habitat/inventory.json):
-//   { "resources": { "ferrite": 90, "silicate-glass": 45 } }
+// One row per material in the `inventory` table (see src/db.ts); a stack that
+// reaches zero is deleted rather than stored as 0.
 
 export type InventoryEntry = {
   resource: string;
@@ -17,12 +16,6 @@ export type InventoryEntry = {
 type InventoryState = {
   resources: Record<string, number>;
 };
-
-const INVENTORY_STATE_FILE = "inventory.json";
-
-function inventoryStatePath(): string {
-  return join(process.cwd(), ".habitat", INVENTORY_STATE_FILE);
-}
 
 export async function listInventory(): Promise<InventoryEntry[]> {
   const state = await readInventoryState();
@@ -119,43 +112,58 @@ function findShortfalls(
 }
 
 async function readInventoryState(): Promise<InventoryState> {
-  const file = Bun.file(inventoryStatePath());
+  return { resources: readInventorySync() };
+}
 
-  if (!(await file.exists())) {
-    return { resources: {} };
-  }
-
-  const contents = await file.text();
-
-  if (contents.trim() === "") {
-    return { resources: {} };
-  }
-
-  const parsed = JSON.parse(contents) as Record<string, unknown>;
-  const rawResources =
-    typeof parsed.resources === "object" &&
-    parsed.resources !== null &&
-    !Array.isArray(parsed.resources)
-      ? (parsed.resources as Record<string, unknown>)
-      : {};
+function readInventorySync(): Record<string, number> {
+  const rows = getDb()
+    .query("SELECT resource, quantity FROM inventory ORDER BY resource")
+    .all() as Array<{ resource: string; quantity: number }>;
 
   const resources: Record<string, number> = {};
 
-  for (const [resource, value] of Object.entries(rawResources)) {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      resources[resource] = value;
-    }
+  for (const row of rows) {
+    resources[row.resource] = row.quantity;
   }
 
-  return { resources };
+  return resources;
 }
 
 async function writeInventoryState(state: InventoryState): Promise<void> {
-  await mkdir(dirname(inventoryStatePath()), { recursive: true });
-  await Bun.write(
-    inventoryStatePath(),
-    `${JSON.stringify(state, null, 2)}\n`,
+  getDb().transaction(() => writeInventorySync(state.resources))();
+}
+
+// Replace the whole inventory table. Like writeModulesSync, this carries no
+// transaction of its own so docking can commit the unload alongside the human
+// and explorer changes in one go.
+export function writeInventorySync(resources: Record<string, number>): void {
+  const database = getDb();
+  database.run("DELETE FROM inventory");
+
+  const insert = database.query(
+    "INSERT INTO inventory (resource, quantity) VALUES (?, ?)",
   );
+
+  for (const [resource, quantity] of Object.entries(resources)) {
+    if (Number.isFinite(quantity) && quantity > 0) {
+      insert.run(resource, quantity);
+    }
+  }
+}
+
+// Fold `additions` (resource -> kg) into the inventory. Used by docking, which
+// already holds a transaction, so this must stay synchronous and unwrapped.
+export function addInventorySync(additions: Record<string, number>): void {
+  const insert = getDb().query(
+    "INSERT INTO inventory (resource, quantity) VALUES (?, ?) " +
+      "ON CONFLICT(resource) DO UPDATE SET quantity = quantity + excluded.quantity",
+  );
+
+  for (const [resource, quantity] of Object.entries(additions)) {
+    if (Number.isFinite(quantity) && quantity > 0) {
+      insert.run(resource, quantity);
+    }
+  }
 }
 
 function normalizeResource(resource: string): string {

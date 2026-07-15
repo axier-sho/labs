@@ -11,6 +11,7 @@ import { registerInventoryCommands } from "./commands/inventory";
 import { registerConstructionCommands } from "./commands/construction";
 import { registerSolarCommands } from "./commands/solar";
 import { registerScanCommands } from "./commands/scan";
+import { registerHumanCommands } from "./commands/human";
 
 const program = new Command();
 
@@ -45,6 +46,8 @@ Commands:
   habitat module update <module-id>          update a local Habitat module
   habitat module set-status <id> <status>    set a module's runtime status
   habitat module delete <module-id>          delete a local Habitat module
+  habitat human list                         list humans and the module each is in
+  habitat human move <human-id> <module-id>  move a human to another module
   habitat tick [count]                       advance the simulation by N ticks
   habitat solar status                       show current solar irradiance from Kepler
   habitat scan --x <n> --y <n> --strength <n>  estimate nearby resources from Kepler
@@ -86,6 +89,9 @@ Agent discovery:
   habitat module update --help
   habitat module set-status --help
   habitat module delete --help
+  habitat human --help
+  habitat human list --help
+  habitat human move --help
   habitat tick --help
   habitat scan --help
   habitat inventory --help
@@ -116,5 +122,6 @@ registerInventoryCommands(program);
 registerConstructionCommands(program);
 registerSolarCommands(program);
 registerScanCommands(program);
+registerHumanCommands(program);
 
 await program.parseAsync();

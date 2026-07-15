@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import type { HabitatRecord, Registration } from "../kepler";
+import type { HydrationSummary } from "../hydration";
 import { apiBaseUrl, apiDelete, apiGet, apiPost } from "../api-client";
 import { reportError } from "../cli";
 
@@ -9,7 +10,7 @@ import { reportError } from "../cli";
 
 type RegisterResult = {
   registration: Registration;
-  summary: { starterModulesHydrated: number; blueprintsCached: number };
+  summary: HydrationSummary;
 };
 
 type StatusResult = {
@@ -35,8 +36,10 @@ export function registerRegistrationCommands(program: Command): void {
         console.log(`Registered habitat '${registration.displayName}' with Kepler.`);
         console.log(`Habitat ID: ${registration.habitatId}`);
         console.log(`Habitat UUID: ${registration.habitatUuid}`);
-        console.log(`Starter modules hydrated: ${summary.starterModulesHydrated}`);
+        console.log(`Starter modules hydrated: ${summary.modulesHydrated}`);
+        console.log(`Starter humans hydrated: ${summary.humansHydrated}`);
         console.log(`Blueprints cached: ${summary.blueprintsCached}`);
+        console.log(`Alert contract: v${summary.alertContractVersion}`);
         console.log(`Saved registration via ${apiBaseUrl()}`);
       } catch (error) {
         reportError(program, error);
