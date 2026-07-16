@@ -1,0 +1,557 @@
+<title>Directing the Intelligence — prompt simulator</title>
+<style>
+  :root {
+    --page-bg: #f7f3ea;
+    --page-card: #ffffff;
+    --page-card-2: #f2ece0;
+    --page-border: #e6ddca;
+    --ink: #211d15;
+    --ink-soft: #4a4234;
+    --ink-muted: #726a59;
+    --ink-faint: #a1967f;
+    --gold: #a8791f;
+    --gold-dim: #c8a24a;
+    --good: #3f8a5f;
+    --bad: #c0524a;
+    --sys: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background:
+      radial-gradient(120% 80% at 50% -8%, rgba(168,121,31,0.09), transparent 55%),
+      var(--page-bg);
+    color: var(--ink);
+    font-family: var(--sys);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 40px 28px 64px; }
+
+  /* ---- masthead ---- */
+  .masthead { margin-bottom: 26px; }
+  .eyebrow {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.28em;
+    text-transform: uppercase; color: var(--gold); margin-bottom: 14px;
+  }
+  .masthead h1 {
+    font-family: var(--serif);
+    font-size: clamp(32px, 4.6vw, 52px);
+    line-height: 1.03; font-weight: 400; margin: 0 0 12px;
+    letter-spacing: -0.01em; text-wrap: balance;
+  }
+  .masthead p { font-size: 16px; color: var(--ink-muted); margin: 0; max-width: 60ch; }
+  .masthead .same { color: var(--ink-soft); border-bottom: 1px solid var(--gold-dim); padding-bottom: 1px; }
+
+  /* ---- composer ---- */
+  .composer {
+    background: var(--page-card); border: 1px solid var(--page-border);
+    border-radius: 16px; overflow: hidden; margin-top: 26px;
+    box-shadow: 0 16px 40px rgba(60,50,30,0.10);
+  }
+  .composer-top {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid var(--page-border);
+    background: var(--page-card-2);
+  }
+  .composer-top .avatar {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    background: #0d0d0d;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .composer-top .avatar svg { width: 16px; height: 16px; color: #fff; }
+  .composer-top b { font-size: 13.5px; font-weight: 600; }
+  .composer-top small { font-size: 12px; color: var(--ink-faint); margin-left: auto; font-family: var(--mono); }
+
+  .composer textarea {
+    width: 100%; border: none; resize: vertical; min-height: 92px;
+    background: transparent; color: var(--ink); font-family: var(--mono);
+    font-size: 14px; line-height: 1.6; padding: 18px 18px 4px; outline: none;
+  }
+  .composer textarea::placeholder { color: var(--ink-faint); }
+
+  .composer-actions {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px 16px; flex-wrap: wrap;
+  }
+  .examples { display: flex; gap: 8px; margin-right: auto; flex-wrap: wrap; }
+  .examples span { font-size: 12px; color: var(--ink-faint); align-self: center; margin-right: 2px; }
+  .chip-btn {
+    font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    padding: 7px 12px; border-radius: 99px; background: transparent;
+    border: 1px solid var(--page-border); color: var(--ink-muted);
+    transition: border-color 140ms ease, color 140ms ease;
+  }
+  .chip-btn:hover { border-color: var(--gold-dim); color: var(--ink-soft); }
+  .generate {
+    font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+    padding: 11px 22px; border-radius: 11px; border: none;
+    background: var(--gold); color: #fffef9;
+    transition: background 140ms ease, transform 80ms ease, opacity 140ms ease;
+  }
+  .generate:hover { background: #8c6519; }
+  .generate:active { transform: translateY(1px); }
+  .generate:disabled { opacity: 0.55; cursor: default; }
+
+  .shake { animation: shake 320ms; }
+  @keyframes shake { 0%,100%{transform:translateX(0);} 20%,60%{transform:translateX(-6px);} 40%,80%{transform:translateX(6px);} }
+
+  /* ---- result area ---- */
+  .result { margin-top: 22px; }
+  .placeholder {
+    border: 1px dashed var(--page-border); border-radius: 16px;
+    padding: 54px 20px; text-align: center; color: var(--ink-faint);
+    font-size: 14.5px;
+  }
+
+  .generating {
+    border: 1px solid var(--page-border); border-radius: 16px;
+    padding: 40px 24px; background: var(--page-card);
+    display: flex; align-items: center; gap: 16px; justify-content: center;
+  }
+  .spin { width: 18px; height: 18px; border-radius: 50%; flex: none;
+    border: 2px solid color-mix(in srgb, var(--gold) 25%, transparent);
+    border-top-color: var(--gold); animation: spin 700ms linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .generating .log { font-family: var(--mono); font-size: 13px; color: var(--ink-muted); }
+
+  .render-in { animation: rin 420ms cubic-bezier(0.22,1,0.36,1) both; }
+  @keyframes rin { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+  .verdict {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+    font-size: 13.5px; font-weight: 600;
+  }
+  .verdict .chip {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 99px;
+  }
+  .verdict.is-bad .chip { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); }
+  .verdict.is-good .chip { color: var(--good); border: 1px solid color-mix(in srgb, var(--good) 45%, transparent); }
+  .verdict .msg { color: var(--ink-soft); }
+  .verdict .again { margin-left: auto; font-size: 12.5px; color: var(--ink-faint); background: none; border: none; cursor: pointer; font-family: inherit; }
+  .verdict .again:hover { color: var(--gold); }
+
+  .device {
+    border: 1px solid var(--page-border); border-radius: 16px; overflow: hidden;
+    box-shadow: 0 20px 50px rgba(60,50,30,0.14);
+  }
+  .real-frame-wrap { position: relative; width: 100%; max-width: 760px; margin-inline: auto; aspect-ratio: 760 / 960; overflow: hidden; background: #12110f; }
+  .real-frame { position: absolute; top: 0; left: 0; width: 760px; height: 960px; border: 0; transform-origin: top left; }
+
+  /* ---- compare (both side by side) ---- */
+  .stage { display: grid; gap: 20px; }
+  .stage.two { grid-template-columns: 1fr 1fr; align-items: start; }
+  .cmp-col { display: flex; flex-direction: column; gap: 12px; }
+  .cmp-prompt {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55;
+    color: var(--ink-muted); background: var(--page-card);
+    border: 1px solid var(--page-border); border-radius: 10px;
+    padding: 10px 12px; white-space: pre-wrap;
+    height: 158px; overflow: auto; /* fixed so both columns align */
+  }
+  .cmp-prompt .cue { color: var(--gold); }
+
+  /* ===== GOOD render — light Meridian design system ===== */
+  .meridian {
+    --bg:#f4efe3; --card:#fffdf8; --border:#e7dfce; --border-soft:#efe8d8;
+    --text:#242017; --text-soft:#4a4234; --muted:#8b8271; --faint:#a79c86;
+    --accent:#a8791f; --accent-dim:#c8a24a; --green:#3f8a5f; --red:#c0524a;
+    --track:#eadfca; --blue:#4f86a0;
+    background: var(--bg); color: var(--text); padding: 16px; font-family: var(--sys);
+  }
+  .meridian .top { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 16px; }
+  .meridian .brand { display: flex; align-items: baseline; gap: 10px; }
+  .meridian .brand b { font-family: var(--serif); font-weight: 400; font-size: 22px; letter-spacing: -0.01em; }
+  .meridian .brand em { font-style: normal; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
+  .meridian .topright { display: flex; align-items: center; gap: 16px; }
+  .meridian .nav { display: flex; gap: 4px; align-items: center; }
+  .meridian .nav a { font-size: 12.5px; font-weight: 500; padding: 6px 12px; border-radius: 99px; color: var(--muted); }
+  .meridian .nav a.on { background: var(--track); color: var(--text); font-weight: 600; }
+  .meridian .tickpill { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-soft); border: 1px solid var(--border); border-radius: 99px; padding: 5px 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .meridian .live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: mpulse 2.4s ease-in-out infinite; }
+  @keyframes mpulse { 0%,100%{ box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 45%,transparent);} 50%{ box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 0%,transparent);} }
+  .meridian .grid { display: flex; gap: 12px; align-items: flex-start; }
+  .meridian .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .meridian .col.left { flex: 1.15; }
+  .meridian .col.right { flex: 1; }
+  .meridian .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; }
+  .meridian .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
+  .meridian .big { font-family: var(--serif); font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--green); }
+  .meridian .unit { font-size: 12px; color: var(--faint); }
+  .meridian .sub { font-size: 12px; color: var(--muted); margin: 8px 0 16px; }
+  .meridian .track { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; margin-bottom: 14px; }
+  .meridian .fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }
+  .meridian .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; font-variant-numeric: tabular-nums; }
+  .meridian .row span:first-child { color: var(--muted); }
+  .meridian .pos { color: var(--green); }
+  .meridian .fnt { color: var(--faint); }
+  .meridian .spark { margin-top: 14px; display: block; width: 100%; height: 34px; }
+  .meridian .mlist { display: flex; flex-direction: column; gap: 12px; }
+  .meridian .mrow { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .meridian .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .meridian .dot.g { background: var(--green); }
+  .meridian .dot.a { background: var(--accent); }
+  .meridian .mrow .st { margin-left: auto; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .meridian .crew { display: flex; flex-direction: column; gap: 12px; }
+  .meridian .person { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .meridian .av { width: 28px; height: 28px; border-radius: 50%; background: var(--track); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--accent); flex: none; }
+  .meridian .person .loc { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .meridian .alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+  .meridian .alert:last-child { border-bottom: none; }
+  .meridian .alert .t { font-size: 13px; font-weight: 600; }
+  .meridian .alert .d { font-size: 12px; color: var(--muted); }
+  .meridian .sevdot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+  .meridian .sev-crit { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent); }
+  .meridian .sev-warn { background: var(--accent); }
+
+  /* ===== BAD render — generic off-brand slop ===== */
+  .slop { background: #ffffff; color: #222; padding: 14px; font-family: "Times New Roman", Times, serif; }
+  .slop .hero { background: linear-gradient(90deg, #7b2ff7, #2f80ff); color: #fff; text-align: center; padding: 18px 12px; border-radius: 8px; margin-bottom: 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
+  .slop .hero h2 { margin: 0 0 4px; font-size: 26px; }
+  .slop .hero p { margin: 0; font-family: Arial, sans-serif; font-size: 13px; opacity: 0.95; }
+  .slop .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .slop .box { border: 2px solid #007bff; border-radius: 6px; padding: 12px; box-shadow: 3px 3px 0 rgba(0,0,0,0.12); background: #f7f9ff; }
+  .slop .box h3 { margin: 0 0 10px; font-family: Arial, sans-serif; font-size: 15px; color: #007bff; }
+  .slop table { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; }
+  .slop th, .slop td { border: 1px solid #bbb; padding: 6px 8px; text-align: left; }
+  .slop th { background: #e9ecef; }
+  .slop .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-family: Arial, sans-serif; font-size: 11px; font-weight: bold; }
+  .slop .b-green { background: #28a745; } .slop .b-red { background: #dc3545; }
+  .slop .b-blue { background: #17a2b8; } .slop .b-orange { background: #fd7e14; }
+  .slop .bignum { font-family: Arial, sans-serif; font-size: 30px; font-weight: bold; color: #28a745; text-align: center; }
+  .slop .muted { font-family: Arial, sans-serif; font-size: 12px; color: #666; text-align: center; }
+  .slop .btnrow { text-align: center; margin-top: 12px; }
+  .slop .btn { background: #007bff; color: #fff; border: none; padding: 8px 14px; border-radius: 4px; font-family: Arial, sans-serif; font-size: 13px; cursor: pointer; margin: 0 4px; }
+  .slop .pie { display: block; margin: 4px auto; }
+  .slop .crewline { font-family: Arial, sans-serif; font-size: 13px; margin: 6px 0; }
+  .slop ul { font-family: Arial, sans-serif; font-size: 12.5px; margin: 6px 0 0; padding-left: 20px; }
+
+  /* ---- takeaway ---- */
+  .takeaway { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .tcard { background: var(--page-card); border: 1px solid var(--page-border); border-radius: 14px; padding: 20px 22px; }
+  .tcard .n { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px; }
+  .tcard h4 { margin: 0 0 8px; font-size: 17px; }
+  .tcard p { margin: 0; font-size: 14px; color: var(--ink-muted); }
+
+  @media (max-width: 900px) {
+    .takeaway, .stage.two { grid-template-columns: 1fr; }
+    .meridian .grid { flex-direction: column; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Directing the Intelligence · Prompt engineering</div>
+    <h1>Ask the model for a dashboard. Watch what the prompt decides.</h1>
+    <p>One <span class="same">Habitat CLI</span>, one model. Paste a prompt below and generate. The only variable is how you describe the work.</p>
+  </header>
+
+  <!-- composer -->
+  <div class="composer">
+    <div class="composer-top">
+      <div class="avatar" aria-label="Codex">
+        <svg viewBox="0 0 24 24" fill="currentColor" role="img" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.1419.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"></path></svg>
+      </div>
+      <b>Codex</b>
+      <small>habitat-cli · overview screen</small>
+    </div>
+    <textarea id="prompt" placeholder="Describe the dashboard you want the model to build…" spellcheck="false"></textarea>
+    <div class="composer-actions">
+      <div class="examples">
+        <span>Load:</span>
+        <button class="chip-btn" data-fill="vague">Vague prompt</button>
+        <button class="chip-btn" data-fill="detailed">Detailed prompt</button>
+      </div>
+      <button class="chip-btn" id="compare">Compare both ⇄</button>
+      <button class="generate" id="run">Generate ▸</button>
+    </div>
+  </div>
+
+  <!-- result -->
+  <div class="result" id="result"></div>
+
+  <div class="takeaway">
+    <div class="tcard">
+      <div class="n">Topic 2 · Prompt engineering</div>
+      <h4>The instruction is the interface</h4>
+      <p>Nothing about the model, the data, or the tool changes between runs. State the goal, the format, and the constraints — a broad request becomes a predictable result.</p>
+    </div>
+    <div class="tcard">
+      <div class="n">Topic 3 · Context engineering</div>
+      <h4>Point it at the source of truth</h4>
+      <p>The strong prompt hands the model the right files — the theme tokens and one example component — not everything. Curated context, not volume, is what makes output fit the system.</p>
+    </div>
+  </div>
+</div>
+
+<!-- hidden render templates -->
+<template id="tpl-vague">
+  <div class="device">
+    <div class="slop">
+      <div class="hero"><h2>🚀 Habitat Dashboard 🚀</h2><p>Welcome back, Commander! Here is your habitat overview.</p></div>
+      <div class="cols">
+        <div class="box">
+          <h3>🔋 Power Status</h3>
+          <div class="bignum">+3.4 kW</div>
+          <div class="muted">Net power (good!)</div>
+          <svg class="pie" width="90" height="90" viewBox="0 0 32 32"><circle r="16" cx="16" cy="16" fill="#28a745"></circle><path d="M16 16 L16 0 A16 16 0 0 1 30 22 Z" fill="#dc3545"></path></svg>
+        </div>
+        <div class="box">
+          <h3>📦 Modules</h3>
+          <table>
+            <tr><th>Name</th><th>Status</th></tr>
+            <tr><td>Command</td><td><span class="badge b-green">ONLINE</span></td></tr>
+            <tr><td>Habitation</td><td><span class="badge b-green">ONLINE</span></td></tr>
+            <tr><td>Solar Array</td><td><span class="badge b-blue">OK</span></td></tr>
+            <tr><td>Fabricator</td><td><span class="badge b-orange">BUILDING</span></td></tr>
+          </table>
+        </div>
+        <div class="box">
+          <h3>👨‍🚀 Crew Members</h3>
+          <div class="crewline">👩‍🚀 Dr. Vega — Command</div>
+          <div class="crewline">🧑‍🚀 R. Okonkwo — Habitation</div>
+          <div class="crewline">👨‍🚀 L. Moreau — Fabricator</div>
+        </div>
+        <div class="box">
+          <h3>⚠️ Alerts</h3>
+          <ul><li><span class="badge b-red">CRITICAL</span> Battery reserve low!!!</li><li><span class="badge b-orange">WARNING</span> Fabricator power stalled</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-detailed">
+  <div class="device">
+    <div class="real-frame-wrap">
+      <iframe class="real-frame" src="http://localhost:8787/" title="Meridian Base — live Habitat dashboard" loading="eager"></iframe>
+    </div>
+  </div>
+</template>
+
+<script>
+  (function () {
+    var ta = document.getElementById("prompt");
+    var runBtn = document.getElementById("run");
+    var result = document.getElementById("result");
+
+    var VAGUE = "make me a dashboard for my habitat cli";
+    var DETAILED =
+"Build the Habitat \"Overview\" screen to match our existing Meridian design system \u2014 don't invent a new style.\n" +
+"First read web/src/theme.css and web/src/components/PowerCard.tsx, and reuse their tokens exactly:\n" +
+"- dark warm ground (#12110f), #1a1815 cards, gold #d3b577 accent\n" +
+"- Instrument Serif for the big figures, uppercase letter-spaced section labels, tabular-nums for all numbers\n" +
+"- 16px rounded cards, generous padding\n" +
+"Layout: power + modules on the left, surface operations in the center, alerts / construction / inventory / crew on the right.\n" +
+"Lead with net power, and show module and alert state as status dots. Restraint over decoration.";
+
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Signals that the ask is specific enough to hit the design system.
+    function isDetailed(text) {
+      var t = text.toLowerCase();
+      var signals = ["theme.css", "meridian", "token", "tabular", "section label",
+        "instrument serif", "sparkline", "design system", "powercard", "16px",
+        "accent", "restraint", "#a8791f", "status dot", "constraint", "off-white"];
+      var hits = 0;
+      for (var i = 0; i < signals.length; i++) if (t.indexOf(signals[i]) !== -1) hits++;
+      return hits >= 2 || text.trim().length > 140;
+    }
+
+    function fill(kind) {
+      ta.value = kind === "vague" ? VAGUE : DETAILED;
+      ta.focus();
+    }
+
+    var placeholder = document.createElement("div");
+    placeholder.className = "placeholder";
+    placeholder.textContent = "Your generated dashboard will appear here.";
+
+    function clearResult() {
+      while (result.firstChild) result.removeChild(result.firstChild);
+    }
+
+    // Scale the 1440px-wide live dashboard down to whatever width the frame
+    // slot currently has, so the whole thing is visible without scrolling.
+    var FRAME_W = 760;
+    function fitFrames(root) {
+      root.querySelectorAll(".real-frame-wrap").forEach(function (w) {
+        var frame = w.querySelector(".real-frame");
+        if (!frame) return;
+        var apply = function () {
+          var width = w.clientWidth || w.getBoundingClientRect().width;
+          if (width > 0) frame.style.transform = "scale(" + width / FRAME_W + ")";
+        };
+        apply();
+        requestAnimationFrame(apply);
+        if (!frame.getAttribute("data-fitbound")) {
+          frame.setAttribute("data-fitbound", "1");
+          frame.addEventListener("load", apply);
+          if (typeof ResizeObserver !== "undefined") new ResizeObserver(apply).observe(w);
+        }
+      });
+    }
+
+    function showPlaceholder() {
+      clearResult();
+      result.appendChild(placeholder);
+    }
+
+    function makeVerdict(good) {
+      var v = document.createElement("div");
+      v.className = "verdict " + (good ? "is-good" : "is-bad");
+
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = good ? "Detailed ask" : "Vague ask";
+
+      var msg = document.createElement("span");
+      msg.className = "msg";
+      msg.textContent = good
+        ? "On-system, legible, ready to ship."
+        : "Off-brand, generic, not shippable.";
+
+      var again = document.createElement("button");
+      again.type = "button";
+      again.className = "again";
+      again.textContent = "Clear ↺";
+      again.addEventListener("click", showPlaceholder);
+
+      v.appendChild(chip);
+      v.appendChild(msg);
+      v.appendChild(again);
+      return v;
+    }
+
+    function render(kind) {
+      var good = kind !== "vague";
+      var tpl = document.getElementById(good ? "tpl-detailed" : "tpl-vague");
+
+      var wrap = document.createElement("div");
+      wrap.className = "render-in";
+      wrap.appendChild(makeVerdict(good));
+      wrap.appendChild(tpl.content.cloneNode(true));
+
+      clearResult();
+      result.appendChild(wrap);
+      fitFrames(wrap);
+    }
+
+    // One column of the side-by-side compare: the prompt that was used, a
+    // verdict chip, and the dashboard it produced.
+    function compareColumn(good) {
+      var col = document.createElement("div");
+      col.className = "cmp-col";
+
+      var verdict = document.createElement("div");
+      verdict.className = "verdict " + (good ? "is-good" : "is-bad");
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = good ? "Detailed ask" : "Vague ask";
+      var msg = document.createElement("span");
+      msg.className = "msg";
+      msg.textContent = good ? "On-system, ready to ship." : "Off-brand, not shippable.";
+      verdict.appendChild(chip);
+      verdict.appendChild(msg);
+
+      var prompt = document.createElement("div");
+      prompt.className = "cmp-prompt";
+      var cue = document.createElement("span");
+      cue.className = "cue";
+      cue.textContent = "> ";
+      prompt.appendChild(cue);
+      prompt.appendChild(document.createTextNode(good ? DETAILED : VAGUE));
+
+      var tpl = document.getElementById(good ? "tpl-detailed" : "tpl-vague");
+
+      col.appendChild(verdict);
+      col.appendChild(prompt);
+      col.appendChild(tpl.content.cloneNode(true));
+      return col;
+    }
+
+    function renderBoth() {
+      if (genTimer) { window.clearInterval(genTimer); genTimer = null; runBtn.disabled = false; }
+      var stage = document.createElement("div");
+      stage.className = "stage two render-in";
+      stage.appendChild(compareColumn(false));
+      stage.appendChild(compareColumn(true));
+      clearResult();
+      result.appendChild(stage);
+      fitFrames(stage);
+    }
+
+    var STEPS = [
+      "Thinking…",
+      "Reading habitat state…",
+      "Writing OverviewView.tsx…",
+      "Rendering preview…",
+    ];
+    var STEP_MS = 1250; // 4 steps × 1250ms = 5s total
+    var genTimer = null;
+
+    function showGenerating() {
+      clearResult();
+      var g = document.createElement("div");
+      g.className = "generating";
+      var s = document.createElement("span");
+      s.className = "spin";
+      var log = document.createElement("span");
+      log.className = "log";
+      log.textContent = STEPS[0];
+      g.appendChild(s);
+      g.appendChild(log);
+      result.appendChild(g);
+      return log;
+    }
+
+    function run() {
+      var text = ta.value.trim();
+      if (text === "") {
+        ta.classList.remove("shake");
+        void ta.offsetWidth;
+        ta.classList.add("shake");
+        return;
+      }
+      var kind = isDetailed(text) ? "detailed" : "vague";
+
+      if (reduce) { render(kind); return; }
+
+      runBtn.disabled = true;
+      var log = showGenerating();
+      var i = 0;
+      if (genTimer) window.clearInterval(genTimer);
+      genTimer = window.setInterval(function () {
+        i++;
+        if (i < STEPS.length) {
+          log.textContent = STEPS[i];
+        } else {
+          window.clearInterval(genTimer);
+          genTimer = null;
+          render(kind);
+          runBtn.disabled = false;
+        }
+      }, STEP_MS);
+    }
+
+    document.querySelectorAll(".chip-btn").forEach(function (b) {
+      b.addEventListener("click", function () { fill(b.getAttribute("data-fill")); });
+    });
+    runBtn.addEventListener("click", run);
+    document.getElementById("compare").addEventListener("click", renderBoth);
+    ta.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
+    });
+
+    window.addEventListener("resize", function () { fitFrames(result); });
+
+    showPlaceholder();
+  })();
+</script>
