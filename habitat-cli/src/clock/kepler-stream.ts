@@ -132,6 +132,9 @@ class KeplerStreamClient {
     this.teardownSocket();
     this.helloAcked = false;
     setConnectionStatus("connecting");
+    // The stream URL carries no token (it is sent in the hello), so it is safe
+    // to log — it shows the journal which endpoint the backend is dialling.
+    console.log(`[habitat-clock] connecting to ${registration.streamUrl}`);
 
     let socket: WebSocket;
     try {
@@ -242,6 +245,11 @@ class KeplerStreamClient {
     this.helloAcked = true;
     setConnectionStatus("connected");
     recordMessageAt();
+    // Journal evidence: proves the backend connected and authenticated. The
+    // token is never logged — only the habitatId the ack matched.
+    console.log(
+      `[habitat-clock] connected and authenticated (habitatId ${registration.habitatId})`,
+    );
   }
 
   // Chain onto the apply queue so ticks apply strictly in arrival order and the
@@ -304,6 +312,10 @@ class KeplerStreamClient {
       // number of local ticks to apply — 1, 10, 100 — never assumed to be 1.
       await runPowerTicks(advancedBy);
       recordAppliedTick(tick, advancedBy);
+      // Journal evidence of an applied tick: absolute tick + advancedBy, no token.
+      console.log(
+        `[habitat-clock] applied planet_tick tick=${tick} advancedBy=${advancedBy}`,
+      );
       emit(true, null);
     } catch (error) {
       emit(false, `failed to apply: ${describeError(error)}`);
@@ -325,6 +337,9 @@ class KeplerStreamClient {
       return;
     }
 
+    console.log(
+      `[habitat-clock] disconnected; reconnecting in ${RECONNECT_DELAY_MS}ms (no missed ticks replayed)`,
+    );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.desiredListening && !this.stopping) {
