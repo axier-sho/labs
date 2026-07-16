@@ -7,3 +7,5 @@ habitat.sqlite-wal
 AGENTS.md
 CLAUDE.md
 lab-tasks/
+web/node_modules/
+web/dist/

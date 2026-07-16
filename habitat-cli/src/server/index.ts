@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { serveStatic } from "hono/bun";
 import { createApp } from "./app";
 
 // Standalone entrypoint for the local Habitat REST backend.
@@ -45,6 +48,17 @@ const host = resolveHost();
 const port = resolvePort();
 const app = createApp();
 
+// Serve the built web dashboard (habitat-cli/web) when a build exists. The API
+// routes above take precedence; only unmatched paths fall through to static
+// files. Kept out of createApp() so the API stays pure for tests.
+const dashboardRoot = "./web/dist";
+const dashboardAvailable = existsSync(join(process.cwd(), "web/dist/index.html"));
+
+if (dashboardAvailable) {
+  app.use("*", serveStatic({ root: dashboardRoot }));
+  app.get("*", serveStatic({ path: join(dashboardRoot, "index.html") }));
+}
+
 Bun.serve({
   fetch: app.fetch,
   hostname: host,
@@ -52,3 +66,8 @@ Bun.serve({
 });
 
 console.log(`[habitat-api] listening on http://${host}:${port}`);
+console.log(
+  dashboardAvailable
+    ? `[habitat-api] serving dashboard from ${dashboardRoot}`
+    : "[habitat-api] no dashboard build found (run: bun run web:build)",
+);

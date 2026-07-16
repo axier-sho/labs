@@ -9,7 +9,10 @@
   "scripts": {
     "habitat": "bun run src/index.ts",
     "server": "bun run src/server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "web:dev": "bun run --cwd web dev",
+    "web:build": "bun run --cwd web build",
+    "web:typecheck": "bun run --cwd web typecheck"
   },
   "dependencies": {
     "commander": "^14",
