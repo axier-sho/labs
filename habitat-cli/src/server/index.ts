@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { serveStatic } from "hono/bun";
 import { createApp } from "./app";
+import { getKeplerStream } from "../clock/kepler-stream";
+import { readClockState } from "../clock/state";
 
 // Standalone entrypoint for the local Habitat REST backend.
 //   bun run server
@@ -71,3 +73,25 @@ console.log(
     ? `[habitat-api] serving dashboard from ${dashboardRoot}`
     : "[habitat-api] no dashboard build found (run: bun run web:build)",
 );
+
+// The clock mode survives restarts because it is persisted. If the saved mode
+// was Kepler, reconnect on our own — no ticks missed during the restart are
+// replayed. If it was manual, this does nothing.
+const savedClock = readClockState();
+console.log(
+  `[habitat-api] clock mode: ${savedClock.mode} (listening ${
+    savedClock.listening ? "on" : "off"
+  })`,
+);
+getKeplerStream().resumeIfEnabled();
+
+// Drop the Kepler socket cleanly on shutdown without changing the saved mode, so
+// the next start comes up in the same mode.
+async function shutdown(signal: string): Promise<void> {
+  console.log(`[habitat-api] ${signal} received, closing Kepler stream`);
+  await getKeplerStream().shutdown();
+  process.exit(0);
+}
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));

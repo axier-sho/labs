@@ -132,6 +132,26 @@ function importLegacyFile(
   }
 }
 
+// Additive column migration. SQLite has no "ADD COLUMN IF NOT EXISTS", so check
+// the current columns first. Only ever used to add nullable columns to an
+// existing table, which never rewrites or drops existing rows.
+function addColumnIfMissing(
+  database: Database,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const columns = database.query(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+
+  if (columns.some((c) => c.name === column)) {
+    return;
+  }
+
+  database.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
 function countRows(database: Database, table: string): number {
   const row = database.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as {
     count: number;
@@ -156,6 +176,48 @@ function migrate(database: Database): void {
       registeredAt  TEXT NOT NULL
     );
   `);
+
+  // Stream credentials returned by /habitats/register were added later. They are
+  // nullable columns bolted onto the existing registration row so a habitat that
+  // registered before Kepler served a live clock keeps its row; it fills these in
+  // by re-running `habitat register` to upgrade in place. streamApiToken is the
+  // single authoritative copy of the WebSocket credential — no second clock-owned
+  // copy exists — and is deliberately never written to logs.
+  addColumnIfMissing(database, "registration", "streamUrl", "TEXT");
+  addColumnIfMissing(database, "registration", "streamApiToken", "TEXT");
+  addColumnIfMissing(database, "registration", "streamProtocolVersion", "TEXT");
+  addColumnIfMissing(database, "registration", "streamSubscriptions", "TEXT");
+  addColumnIfMissing(database, "registration", "streamCurrentTick", "INTEGER");
+  addColumnIfMissing(database, "registration", "streamTicksPerPulse", "INTEGER");
+  addColumnIfMissing(database, "registration", "streamTickIntervalMs", "INTEGER");
+  addColumnIfMissing(database, "registration", "streamStatus", "TEXT");
+
+  // The single, pinned clock-mode row (id = 1). `mode`/`listening` are the
+  // authoritative "manual vs Kepler" setting that survives a backend restart; the
+  // rest is observability the CLI surfaces through `habitat clock status`.
+  // lastTick is the most recent *absolute* Kepler tick applied, used to ignore
+  // duplicate or older notices. The row is seeded to manual + listening off so a
+  // freshly registered (or freshly migrated) habitat defaults to manual ticks.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS clock_state (
+      id                INTEGER PRIMARY KEY CHECK (id = 1),
+      mode              TEXT NOT NULL DEFAULT 'manual' CHECK (mode IN ('manual', 'kepler')),
+      listening         INTEGER NOT NULL DEFAULT 0 CHECK (listening IN (0, 1)),
+      connectionStatus  TEXT NOT NULL DEFAULT 'disconnected'
+                        CHECK (connectionStatus IN ('connecting', 'connected', 'disconnected', 'error')),
+      lastTick          INTEGER,
+      lastAdvancedBy    INTEGER,
+      lastConnectedAt   TEXT,
+      lastMessageAt     TEXT,
+      lastError         TEXT,
+      updatedAt         TEXT
+    );
+  `);
+
+  database.run(
+    "INSERT OR IGNORE INTO clock_state (id, mode, listening, connectionStatus) " +
+      "VALUES (1, 'manual', 0, 'disconnected')",
+  );
 
   // `seq` exists only to give modules a stable listing order (the order Kepler
   // sent them at registration). `id` is the habitat-local module id.

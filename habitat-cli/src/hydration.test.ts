@@ -36,6 +36,16 @@ const registration: Registration = {
   displayName: "Test Habitat",
   baseUrl: "https://planet.example.com",
   registeredAt: "2026-07-15T00:00:00.000Z",
+  streamUrl: "wss://planet.example.com/planet/stream",
+  streamApiToken: "test-stream-token",
+  stream: {
+    protocolVersion: "1.0",
+    subscriptions: ["ticks"],
+    currentTick: 800,
+    ticksPerPulse: 1,
+    tickIntervalMs: 1000,
+    status: "running",
+  },
 };
 
 function responseWith(
@@ -43,6 +53,16 @@ function responseWith(
 ): RegisterResponse {
   return {
     habitatId: "habitat_test",
+    streamUrl: "wss://planet.example.com/planet/stream",
+    apiToken: "test-stream-token",
+    stream: {
+      protocolVersion: "1.0",
+      subscriptions: ["ticks"],
+      currentTick: 800,
+      ticksPerPulse: 1,
+      tickIntervalMs: 1000,
+      status: "running",
+    },
     starterModules: [
       {
         id: "starter-command",

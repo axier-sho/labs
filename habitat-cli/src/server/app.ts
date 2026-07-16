@@ -1,4 +1,14 @@
 import { Hono, type Context } from "hono";
+import { streamSSE } from "hono/streaming";
+import {
+  isListening,
+  readClockState,
+  type ClockState,
+} from "../clock/state";
+import {
+  getKeplerStream,
+  type ClockEvent,
+} from "../clock/kepler-stream";
 import {
   fetchBlueprintCatalog,
   fetchHabitatStatus,
@@ -7,6 +17,7 @@ import {
   readRegistration,
   registerHabitat,
   unregisterHabitat,
+  writeRegistrationSync,
 } from "../kepler";
 import { showBlueprint } from "../catalog";
 import {
@@ -50,6 +61,24 @@ import {
 //
 // Routes return JSON, never terminal-formatted text. Human-friendly formatting
 // stays on the CLI side.
+// The JSON shape returned by both clock routes. `manualTicksAllowed` is derived
+// from `listening` here so the CLI and any agent read one authoritative answer
+// instead of re-deriving the rule.
+function clockStatusBody(state: ClockState) {
+  return {
+    mode: state.mode,
+    listening: state.listening,
+    manualTicksAllowed: !state.listening,
+    connectionStatus: state.connectionStatus,
+    lastTick: state.lastTick,
+    lastAdvancedBy: state.lastAdvancedBy,
+    lastConnectedAt: state.lastConnectedAt,
+    lastMessageAt: state.lastMessageAt,
+    lastError: state.lastError,
+    updatedAt: state.updatedAt,
+  };
+}
+
 export function createApp() {
   const app = new Hono();
 
@@ -80,7 +109,20 @@ export function createApp() {
     const name = typeof body.name === "string" ? body.name : "";
 
     try {
-      const { registration, response } = await registerHabitat(name);
+      const { registration, response, upgrade } = await registerHabitat(name);
+
+      // An upgrade re-registers a legacy habitat only to capture its stream
+      // credentials, so it must not re-hydrate (which would overwrite the
+      // existing crew, modules, and their runtime state). It just updates the
+      // registration row with the returned stream URL, token, and metadata.
+      if (upgrade) {
+        writeRegistrationSync(registration);
+        console.log(
+          `[habitat-api] POST /registration -> upgraded ${registration.habitatId} with stream credentials`,
+        );
+        return c.json({ registration, summary: null, upgraded: true }, 200);
+      }
+
       const summary = await hydrateRegistration({ registration, response });
 
       console.log(
@@ -150,6 +192,111 @@ export function createApp() {
         error: message,
       });
     }
+  });
+
+  // --- Live clock ---------------------------------------------------------
+  // The clock mode (manual vs Kepler) and the WebSocket that drives it are owned
+  // here in the backend, not the CLI. These routes read and flip that saved
+  // state; the CLI and dashboard are just clients of them.
+
+  // GET /clock/status -> the persisted clock mode plus live connection view.
+  app.get("/clock/status", (c) => {
+    const state = readClockState();
+    console.log(
+      `[habitat-api] GET /clock/status -> ${state.mode}, listening ${
+        state.listening ? "on" : "off"
+      }`,
+    );
+    return c.json(clockStatusBody(state));
+  });
+
+  // POST /clock/listen { listening: boolean } -> turn Kepler listening on/off.
+  // On: saves Kepler mode, then opens the authenticated WebSocket. Off: closes
+  // the socket, drains any in-flight tick, then returns to manual mode.
+  app.post("/clock/listen", async (c) => {
+    let body: { listening?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        { error: "Request body must be JSON with a boolean 'listening'." },
+        400,
+      );
+    }
+
+    if (typeof body.listening !== "boolean") {
+      return c.json({ error: "'listening' must be true or false." }, 400);
+    }
+
+    if (body.listening) {
+      // A stream token is required to connect. Fail clearly rather than flipping
+      // to Kepler mode with nothing to listen to.
+      const registration = await readRegistration();
+      if (registration === null || registration.streamApiToken === null) {
+        console.log("[habitat-api] POST /clock/listen -> 400 no stream token");
+        return c.json(
+          {
+            error:
+              registration === null
+                ? "This habitat is not registered yet."
+                : "No stream credentials saved. Re-run 'habitat register' to upgrade this habitat before listening.",
+          },
+          400,
+        );
+      }
+
+      getKeplerStream().enable();
+      console.log("[habitat-api] POST /clock/listen -> listening on");
+    } else {
+      await getKeplerStream().disable();
+      console.log("[habitat-api] POST /clock/listen -> listening off");
+    }
+
+    return c.json(clockStatusBody(readClockState()));
+  });
+
+  // GET /clock/events -> a long-running Server-Sent Events stream of future
+  // planet_tick notices, owned entirely by this backend. It never replays past
+  // events and never carries the stream token, so it is safe for the CLI's
+  // `habitat clock watch` to consume without touching Kepler directly.
+  app.get("/clock/events", (c) => {
+    return streamSSE(c, async (stream) => {
+      const queue: ClockEvent[] = [];
+      let wake: (() => void) | null = null;
+
+      const unsubscribe = getKeplerStream().subscribe((event) => {
+        queue.push(event);
+        wake?.();
+      });
+
+      stream.onAbort(() => {
+        unsubscribe();
+        wake?.();
+      });
+
+      console.log("[habitat-api] GET /clock/events -> watcher connected");
+
+      try {
+        while (!stream.aborted) {
+          if (queue.length === 0) {
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+            wake = null;
+            continue;
+          }
+
+          const event = queue.shift() as ClockEvent;
+          await stream.writeSSE({
+            event: "planet_tick",
+            data: JSON.stringify(event),
+          });
+        }
+      } finally {
+        unsubscribe();
+        console.log("[habitat-api] GET /clock/events -> watcher disconnected");
+      }
+    });
   });
 
   // --- Kepler catalog + solar reads (proxied) -----------------------------
@@ -593,6 +740,21 @@ export function createApp() {
     } catch {
       console.log("[habitat-api] POST /ticks -> 400 invalid JSON");
       return c.json({ error: "Request body must be JSON." }, 400);
+    }
+
+    // Manual ticks are only allowed while listening to Kepler is off. The check
+    // reads the saved clock mode, which is flipped to 'kepler' before the socket
+    // opens, so a manual tick can never slip in during the connect window.
+    if (isListening()) {
+      console.log("[habitat-api] POST /ticks -> 409 rejected (listening on)");
+      return c.json(
+        {
+          error:
+            "Manual ticks are disabled while listening to Kepler.\n" +
+            "Kepler is driving this habitat's clock. Run 'habitat clock listen off' to return to manual mode.",
+        },
+        409,
+      );
     }
 
     const count = typeof body.count === "number" ? body.count : NaN;

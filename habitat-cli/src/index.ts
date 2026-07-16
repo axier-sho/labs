@@ -6,6 +6,7 @@ import { databasePath } from "./kepler";
 import { registerRegistrationCommands } from "./commands/registration";
 import { registerModuleCommands } from "./commands/module";
 import { registerTickCommands } from "./commands/tick";
+import { registerClockCommands } from "./commands/clock";
 import { registerCatalogCommands } from "./commands/catalog";
 import { registerInventoryCommands } from "./commands/inventory";
 import { registerConstructionCommands } from "./commands/construction";
@@ -20,7 +21,10 @@ const program = new Command();
 program
   .name("habitat")
   .description("Register a habitat with the Kepler planet server.")
-  .version(packageJson.version);
+  .version(packageJson.version)
+  // Global machine-readable streaming flag, consumed by `clock watch` so both
+  // `habitat --jsonl clock watch` and `habitat clock watch --jsonl` work.
+  .option("--jsonl", "emit newline-delimited JSON for streaming commands");
 
 program.configureOutput({
   outputError: (message, write) => {
@@ -50,7 +54,10 @@ Commands:
   habitat module delete <module-id>          delete a local Habitat module
   habitat human list                         list humans and the module each is in
   habitat human move <human-id> <module-id>  move a human to another module
-  habitat tick [count]                       advance the simulation by N ticks
+  habitat tick [count]                       advance the simulation by N ticks (manual mode only)
+  habitat clock status                       show clock mode and Kepler connection
+  habitat clock listen on|off                follow Kepler ticks, or return to manual
+  habitat clock watch                        stream future Kepler ticks (Ctrl+C to stop)
   habitat solar status                       show current solar irradiance from Kepler
   habitat eva status                         show explorer, position, carried load
   habitat eva deploy <human-id>              send one human out through the suitport
@@ -102,6 +109,10 @@ Agent discovery:
   habitat human list --help
   habitat human move --help
   habitat tick --help
+  habitat clock --help
+  habitat clock status --help
+  habitat clock listen --help
+  habitat clock watch --help
   habitat eva --help
   habitat eva status --help
   habitat eva deploy --help
@@ -134,6 +145,7 @@ Agent discovery:
 // list in --help is unchanged.
 registerRegistrationCommands(program);
 registerTickCommands(program);
+registerClockCommands(program);
 registerModuleCommands(program);
 registerCatalogCommands(program);
 registerInventoryCommands(program);

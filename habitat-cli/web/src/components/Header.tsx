@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDashboard } from "../hooks/useDashboardData";
 import { formatSimTime, parseTickCount } from "../lib/power";
 
@@ -16,11 +16,49 @@ const TICK_PRESETS = [
   { count: 3600, label: "+1 h" },
 ];
 
+// Auto-tick speeds: simulated ticks advanced per real second.
+const AUTO_SPEEDS = [
+  { ticksPerSecond: 1, label: "1×" },
+  { ticksPerSecond: 10, label: "10×" },
+  { ticksPerSecond: 60, label: "60×" },
+  { ticksPerSecond: 600, label: "600×" },
+];
+
 function TickControls() {
   const { advanceTicks, busy, sessionTicks, tickFlash } = useDashboard();
   const [custom, setCustom] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [auto, setAuto] = useState(false);
+  const [speed, setSpeed] = useState(60);
   const ticksBusy = Boolean(busy.ticks);
+
+  // Auto-tick: advance `speed` ticks once per real second. Each round is
+  // scheduled only after the previous request settles, so a slow server never
+  // stacks overlapping tick runs. Any failure pauses the clock.
+  useEffect(() => {
+    if (!auto) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const loop = async () => {
+      try {
+        await advanceTicks(speed);
+      } catch (err) {
+        if (!cancelled) {
+          setAuto(false);
+          setError(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+      if (!cancelled) timer = window.setTimeout(() => void loop(), 1000);
+    };
+
+    timer = window.setTimeout(() => void loop(), 0);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [auto, speed, advanceTicks]);
 
   const run = async (count: number) => {
     setError(null);
@@ -91,6 +129,39 @@ function TickControls() {
       </div>
 
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button
+          className="pill"
+          style={
+            auto
+              ? { borderColor: "var(--accent)", color: "var(--accent)" }
+              : undefined
+          }
+          aria-pressed={auto}
+          title={
+            auto
+              ? "Pause the automatic clock"
+              : `Advance time continuously (${speed} ticks per second)`
+          }
+          onClick={() => {
+            setError(null);
+            setAuto((on) => !on);
+          }}
+        >
+          {auto ? "⏸ Pause" : "▶ Auto"}
+        </button>
+        <select
+          className="text-input tabular"
+          style={{ padding: "6px 8px", fontSize: 12 }}
+          aria-label="Auto-tick speed (simulated ticks per real second)"
+          value={speed}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+        >
+          {AUTO_SPEEDS.map((option) => (
+            <option key={option.ticksPerSecond} value={option.ticksPerSecond}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         {TICK_PRESETS.map((preset) => (
           <button
             key={preset.count}

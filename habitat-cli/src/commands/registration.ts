@@ -10,7 +10,10 @@ import { reportError } from "../cli";
 
 type RegisterResult = {
   registration: Registration;
-  summary: HydrationSummary;
+  // Null when this was an in-place upgrade of a legacy registration (no crew or
+  // modules were re-hydrated — only the stream credentials were captured).
+  summary: HydrationSummary | null;
+  upgraded?: boolean;
 };
 
 type StatusResult = {
@@ -21,6 +24,39 @@ type StatusResult = {
   error?: string;
 };
 
+// Reveal the saved live-clock stream credentials in the human-readable status.
+// The stream API token is a live credential: it is shown here on purpose so the
+// operator can inspect the contract, but it is never logged by the backend and
+// never committed to Git. Do not screenshot or record this screen publicly.
+function printStreamInfo(registration: Registration): void {
+  if (registration.streamUrl === null || registration.streamApiToken === null) {
+    console.log(
+      "Stream credentials: none (legacy registration). " +
+        "Re-run 'habitat register --name \"<same name>\"' to upgrade in place.",
+    );
+    return;
+  }
+
+  console.log(`Stream URL: ${registration.streamUrl}`);
+  console.log(`Stream API token: ${registration.streamApiToken}`);
+
+  const stream = registration.stream;
+  if (stream !== null) {
+    console.log(
+      `Stream subscriptions: ${
+        stream.subscriptions.length > 0 ? stream.subscriptions.join(", ") : "none"
+      }`,
+    );
+    console.log(
+      `Planet clock (at registration): tick ${stream.currentTick}, ` +
+        `status ${stream.status}, ticksPerPulse ${stream.ticksPerPulse}` +
+        (stream.tickIntervalMs > 0
+          ? `, tickIntervalMs ${stream.tickIntervalMs}`
+          : ""),
+    );
+  }
+}
+
 export function registerRegistrationCommands(program: Command): void {
   program
     .command("register")
@@ -28,10 +64,27 @@ export function registerRegistrationCommands(program: Command): void {
     .requiredOption("-n, --name <name>", "habitat display name")
     .action(async (options: { name: string }) => {
       try {
-        const { registration, summary } = await apiPost<RegisterResult>(
-          "/registration",
-          { name: options.name },
-        );
+        const result = await apiPost<RegisterResult>("/registration", {
+          name: options.name,
+        });
+        const { registration, summary } = result;
+
+        // An upgrade only captured stream credentials for an already-registered
+        // habitat; the crew and modules were left untouched, so there is no
+        // hydration summary to report.
+        if (summary === null || result.upgraded === true) {
+          console.log(
+            `Upgraded habitat '${registration.displayName}' with Kepler stream credentials.`,
+          );
+          console.log(`Habitat ID: ${registration.habitatId}`);
+          console.log(`Stream URL: ${registration.streamUrl ?? "none"}`);
+          console.log(
+            "Listening defaults to off. Run 'habitat status' to view the full stream token, " +
+              "then 'habitat clock listen on' when you are ready to follow Kepler.",
+          );
+          console.log(`Saved registration via ${apiBaseUrl()}`);
+          return;
+        }
 
         console.log(`Registered habitat '${registration.displayName}' with Kepler.`);
         console.log(`Habitat ID: ${registration.habitatId}`);
@@ -40,6 +93,7 @@ export function registerRegistrationCommands(program: Command): void {
         console.log(`Starter humans hydrated: ${summary.humansHydrated}`);
         console.log(`Blueprints cached: ${summary.blueprintsCached}`);
         console.log(`Alert contract: v${summary.alertContractVersion}`);
+        console.log("Listening to Kepler defaults to off (manual ticks).");
         console.log(`Saved registration via ${apiBaseUrl()}`);
       } catch (error) {
         reportError(program, error);
@@ -49,9 +103,17 @@ export function registerRegistrationCommands(program: Command): void {
   program
     .command("status")
     .description("Show Kepler registration status for this habitat.")
-    .action(async () => {
+    .option("--json", "print the complete JSON response")
+    .action(async (options: { json?: boolean }) => {
       try {
         const status = await apiGet<StatusResult>("/status");
+
+        // The --json output exposes the full registration record — stream URL and
+        // token included — with stable field names for scripts and agents.
+        if (options.json === true) {
+          console.log(JSON.stringify(status, null, 2));
+          return;
+        }
 
         if (status.registration === null) {
           console.log("Registered: no");
@@ -72,6 +134,7 @@ export function registerRegistrationCommands(program: Command): void {
           console.log(`Server status: ${habitat.status}`);
           console.log(`Last seen: ${habitat.lastSeenAt ?? "never"}`);
           console.log(`Modules: ${status.modules}`);
+          printStreamInfo(status.registration);
           return;
         }
 
@@ -80,6 +143,7 @@ export function registerRegistrationCommands(program: Command): void {
         console.log(`Habitat ID: ${status.registration.habitatId}`);
         console.log(`Name: ${status.registration.displayName}`);
         console.log(`Modules: ${status.modules}`);
+        printStreamInfo(status.registration);
         if (status.error !== undefined) {
           console.log(`Could not reach Kepler: ${status.error}`);
         }

@@ -13,12 +13,32 @@ const DEFAULT_TOKEN = "admin-dev-token";
 // where their local state is kept.
 export { databasePath };
 
+// The live-clock stream descriptor returned by registration. `subscriptions`
+// bounds what the WebSocket may ask for; `currentTick` is the planet clock at
+// registration time (a starting reference only — ticks missed before listening
+// are never replayed).
+export type StreamMetadata = {
+  protocolVersion: string;
+  subscriptions: string[];
+  currentTick: number;
+  ticksPerPulse: number;
+  tickIntervalMs: number;
+  status: string;
+};
+
 export type Registration = {
   habitatId: string;
   habitatUuid: string;
   displayName: string;
   baseUrl: string;
   registeredAt: string;
+  // Kepler live-clock stream credentials. Null on a legacy registration made
+  // before Kepler served a clock; re-running `habitat register` upgrades it.
+  // streamApiToken is a live credential: `habitat status` reveals it to the
+  // operator on purpose, but it is never logged and never committed to Git.
+  streamUrl: string | null;
+  streamApiToken: string | null;
+  stream: StreamMetadata | null;
 };
 
 // Server-returned habitat record (GET /habitats/{habitatId}).
@@ -35,6 +55,11 @@ export type HabitatRecord = {
 // crew and infrastructure. Nothing in it is duplicated as a hard-coded literal.
 export type RegisterResponse = {
   habitatId: string;
+  streamUrl: string;
+  // Habitat-specific WebSocket credential — NOT the bearer token used to
+  // authorize this registration request. It authenticates the WebSocket hello.
+  apiToken: string;
+  stream: StreamMetadata;
   starterModules: StarterModuleInstance[];
   starterHumans: StarterHuman[];
   blueprints: ProductionBlueprint[];
@@ -315,6 +340,7 @@ export async function fetchWorldScan(
 export async function registerHabitat(name: string): Promise<{
   registration: Registration;
   response: RegisterResponse;
+  upgrade: boolean;
 }> {
   const displayName = name.trim();
 
@@ -324,20 +350,30 @@ export async function registerHabitat(name: string): Promise<{
 
   const existing = await readRegistration();
 
-  if (existing !== null) {
+  // A registration made before Kepler served a live clock has no stream token.
+  // Re-registering then *upgrades in place*: reuse the same habitat UUID and
+  // display name so Kepler returns fresh stream credentials for the existing
+  // habitat, and keep the crew and modules exactly as they are.
+  const upgrade = existing !== null && existing.streamApiToken === null;
+
+  if (existing !== null && !upgrade) {
     throw new Error(
       `This habitat is already registered as '${existing.displayName}' (habitatId ${existing.habitatId}).\n` +
         "Run 'habitat unregister' first if you want to register again.",
     );
   }
 
-  const baseUrl = resolveBaseUrl();
-  // The client mints the habitat UUID; the server returns the habitatId.
-  const habitatUuid = crypto.randomUUID();
+  const baseUrl = existing !== null && upgrade ? existing.baseUrl : resolveBaseUrl();
+  // The client mints the habitat UUID once; an upgrade reuses the original so
+  // Kepler recognises the same habitat rather than minting a second one.
+  const habitatUuid =
+    existing !== null && upgrade ? existing.habitatUuid : crypto.randomUUID();
+  const effectiveName =
+    existing !== null && upgrade ? existing.displayName : displayName;
 
   const response = (await request(baseUrl, "POST", "/habitats/register", {
     habitatUuid,
-    displayName,
+    displayName: effectiveName,
   })) as RegisterResponse;
 
   validateRegisterResponse(response);
@@ -345,15 +381,22 @@ export async function registerHabitat(name: string): Promise<{
   const registration: Registration = {
     habitatId: response.habitatId,
     habitatUuid,
-    displayName,
+    displayName: effectiveName,
     baseUrl,
-    registeredAt: new Date().toISOString(),
+    registeredAt:
+      existing !== null && upgrade
+        ? existing.registeredAt
+        : new Date().toISOString(),
+    streamUrl: response.streamUrl,
+    streamApiToken: response.apiToken,
+    stream: response.stream,
   };
 
-  // Deliberately not persisted here. The caller commits the registration row
-  // together with the starter modules and humans in one transaction, so a
-  // habitat is never left registered but crewless.
-  return { registration, response };
+  // Deliberately not persisted here. On a fresh registration the caller commits
+  // this row together with the starter modules and humans in one transaction, so
+  // a habitat is never left registered but crewless. An upgrade instead just
+  // updates this row, leaving the existing crew and modules untouched.
+  return { registration, response, upgrade };
 }
 
 // Fail before touching local state if the response is missing anything the
@@ -373,6 +416,26 @@ function validateRegisterResponse(response: RegisterResponse): void {
 
   if (typeof response.contracts?.alerts?.schemaVersion !== "string") {
     throw new Error("Kepler returned no contracts.alerts definition.");
+  }
+
+  if (typeof response.streamUrl !== "string" || response.streamUrl === "") {
+    throw new Error(
+      "Kepler returned no streamUrl. This Habitat cannot connect to the live clock.",
+    );
+  }
+
+  if (typeof response.apiToken !== "string" || response.apiToken === "") {
+    throw new Error("Kepler returned no stream apiToken.");
+  }
+
+  const stream = response.stream;
+
+  if (
+    typeof stream !== "object" ||
+    stream === null ||
+    !Array.isArray(stream.subscriptions)
+  ) {
+    throw new Error("Kepler returned no stream metadata.");
   }
 }
 
@@ -491,15 +554,84 @@ export async function unregisterHabitat(): Promise<Registration> {
   return registration;
 }
 
-export async function readRegistration(): Promise<Registration | null> {
+// The flat shape of the registration row: stream metadata is stored one value
+// per column and reassembled into the nested `stream` object on read.
+type RegistrationRow = {
+  habitatId: string;
+  habitatUuid: string;
+  displayName: string;
+  baseUrl: string;
+  registeredAt: string;
+  streamUrl: string | null;
+  streamApiToken: string | null;
+  streamProtocolVersion: string | null;
+  streamSubscriptions: string | null;
+  streamCurrentTick: number | null;
+  streamTicksPerPulse: number | null;
+  streamTickIntervalMs: number | null;
+  streamStatus: string | null;
+};
+
+// Synchronous read. The SQLite query does no real I/O, so the WebSocket client's
+// synchronous socket callbacks can read the saved registration (and its stream
+// token) directly without threading a promise through.
+export function readRegistrationSync(): Registration | null {
   const row = getDb()
     .query(
-      "SELECT habitatId, habitatUuid, displayName, baseUrl, registeredAt " +
+      "SELECT habitatId, habitatUuid, displayName, baseUrl, registeredAt, " +
+        "streamUrl, streamApiToken, streamProtocolVersion, streamSubscriptions, " +
+        "streamCurrentTick, streamTicksPerPulse, streamTickIntervalMs, streamStatus " +
         "FROM registration WHERE id = 1",
     )
-    .get() as Registration | null;
+    .get() as RegistrationRow | null;
 
-  return row ?? null;
+  if (row === null) {
+    return null;
+  }
+
+  return {
+    habitatId: row.habitatId,
+    habitatUuid: row.habitatUuid,
+    displayName: row.displayName,
+    baseUrl: row.baseUrl,
+    registeredAt: row.registeredAt,
+    streamUrl: row.streamUrl,
+    streamApiToken: row.streamApiToken,
+    stream: buildStreamMetadata(row),
+  };
+}
+
+export async function readRegistration(): Promise<Registration | null> {
+  return readRegistrationSync();
+}
+
+// Reassemble the nested stream descriptor from the flat columns, or null when
+// this registration predates stream credentials.
+function buildStreamMetadata(row: RegistrationRow): StreamMetadata | null {
+  if (row.streamProtocolVersion === null) {
+    return null;
+  }
+
+  let subscriptions: string[] = [];
+  if (row.streamSubscriptions !== null) {
+    try {
+      const parsed = JSON.parse(row.streamSubscriptions);
+      if (Array.isArray(parsed)) {
+        subscriptions = parsed.map((value) => String(value));
+      }
+    } catch {
+      subscriptions = [];
+    }
+  }
+
+  return {
+    protocolVersion: row.streamProtocolVersion,
+    subscriptions,
+    currentTick: row.streamCurrentTick ?? 0,
+    ticksPerPulse: row.streamTicksPerPulse ?? 1,
+    tickIntervalMs: row.streamTickIntervalMs ?? 0,
+    status: row.streamStatus ?? "unknown",
+  };
 }
 
 async function requireRegistration(): Promise<Registration> {
@@ -518,22 +650,42 @@ async function requireRegistration(): Promise<Registration> {
 // Synchronous, and carries no transaction of its own, so registration hydration
 // can commit this row alongside the starter modules and humans.
 export function writeRegistrationSync(registration: Registration): void {
+  const stream = registration.stream;
+
   getDb().run(
     "INSERT INTO registration " +
-      "(id, habitatId, habitatUuid, displayName, baseUrl, registeredAt) " +
-      "VALUES (1, ?, ?, ?, ?, ?) " +
+      "(id, habitatId, habitatUuid, displayName, baseUrl, registeredAt, " +
+      "streamUrl, streamApiToken, streamProtocolVersion, streamSubscriptions, " +
+      "streamCurrentTick, streamTicksPerPulse, streamTickIntervalMs, streamStatus) " +
+      "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET " +
       "habitatId = excluded.habitatId, " +
       "habitatUuid = excluded.habitatUuid, " +
       "displayName = excluded.displayName, " +
       "baseUrl = excluded.baseUrl, " +
-      "registeredAt = excluded.registeredAt",
+      "registeredAt = excluded.registeredAt, " +
+      "streamUrl = excluded.streamUrl, " +
+      "streamApiToken = excluded.streamApiToken, " +
+      "streamProtocolVersion = excluded.streamProtocolVersion, " +
+      "streamSubscriptions = excluded.streamSubscriptions, " +
+      "streamCurrentTick = excluded.streamCurrentTick, " +
+      "streamTicksPerPulse = excluded.streamTicksPerPulse, " +
+      "streamTickIntervalMs = excluded.streamTickIntervalMs, " +
+      "streamStatus = excluded.streamStatus",
     [
       registration.habitatId,
       registration.habitatUuid,
       registration.displayName,
       registration.baseUrl,
       registration.registeredAt,
+      registration.streamUrl,
+      registration.streamApiToken,
+      stream?.protocolVersion ?? null,
+      stream === null ? null : JSON.stringify(stream.subscriptions),
+      stream?.currentTick ?? null,
+      stream?.ticksPerPulse ?? null,
+      stream?.tickIntervalMs ?? null,
+      stream?.status ?? null,
     ],
   );
 }
